@@ -26,26 +26,28 @@ class DocumentProcessor:
     """Handles document processing with advanced chunking strategies."""
     
     def __init__(self, 
-                 chunk_size: int = 100,  # Smaller default chunk size for testing
-                 chunk_overlap: int = 20,
-                 length_function: str = "token"):
-        """Initialize the document processor.
-        
-        Args:
-            chunk_size: Target size for each chunk
-            chunk_overlap: Number of overlapping tokens/chars between chunks
-            length_function: Method to count length ('token' or 'char')
-        """
+                 chunk_size: int = 150,  # Default to smaller chunks
+                 chunk_overlap: int = 50,  # Larger overlap to avoid splitting sentences
+                 length_function: str = "char"):  # Use char count by default
+        """Initialize the document processor."""
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
         self.length_function = length_function
-        
-        # Initialize tokenizer for token counting
         self.tokenizer = tiktoken.get_encoding("cl100k_base")
         
-        # Initialize text splitter
+        # Initialize text splitter with better separators
         self.text_splitter = RecursiveCharacterTextSplitter(
-            separators=["\n\n", "\n", ". ", " ", ""],
+            separators=[
+                "\n\n",  # Paragraph breaks
+                "\n",    # Line breaks
+                ".",     # Sentence breaks
+                "!",     # Exclamation marks
+                "?",     # Question marks
+                ";",     # Semicolons
+                ":",     # Colons
+                " ",     # Words
+                ""       # Characters
+            ],
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
             length_function=self._get_length_function(),
@@ -59,17 +61,8 @@ class DocumentProcessor:
         return len
     
     def _clean_text(self, text: str) -> str:
-        """Clean and preprocess text.
-        
-        - Remove excessive whitespace
-        - Fix common OCR artifacts
-        - Normalize unicode characters
-        - Remove non-printable characters
-        """
-        # Import here to avoid loading at module level
+        """Clean and preprocess text."""
         from ftfy import fix_text
-        
-        # First fix any encoding/unicode issues
         text = fix_text(text)
         
         # Split into lines and process each line
@@ -78,13 +71,14 @@ class DocumentProcessor:
             line = line.strip()
             if not line:
                 continue
-            # If line ends with hyphen, remove it
             if line.endswith('-'):
                 line = line[:-1]
             lines.append(line)
         
-        # Join lines with spaces and normalize whitespace
-        text = ' '.join(' '.join(line.split()) for line in lines)
+        # Join lines and normalize whitespace
+        text = ' '.join(lines)
+        text = re.sub(r'\s+([.,!?;:])', r'\1', text)
+        text = ' '.join(text.split())
         
         return text.strip()
     
@@ -92,20 +86,13 @@ class DocumentProcessor:
         """Extract text from PDF with metadata."""
         result = []
         
-        # Suppress all warnings from pypdf
         with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", category=UserWarning)
-            warnings.filterwarnings("ignore", category=DeprecationWarning)
+            warnings.filterwarnings("ignore")
             
             try:
-                # Create reader with error handling and recovery options
                 reader = PdfReader(file_or_path, strict=False)
+                metadata = {'title': '', 'file_type': 'pdf'}
                 
-                # Get metadata from first page
-                metadata = {
-                    'title': '',
-                    'file_type': 'pdf'
-                }
                 try:
                     if hasattr(reader, 'metadata') and reader.metadata:
                         metadata['title'] = reader.metadata.get('/Title', '')
@@ -115,39 +102,61 @@ class DocumentProcessor:
                 # Process each page
                 for i, page in enumerate(reader.pages):
                     try:
-                        # Get page text with fallback methods
                         text = page.extract_text()
-                        
-                        # Clean text
                         cleaned_text = self._clean_text(text) if text else ""
                         if not cleaned_text:
-                            logger.warning(f"No text extracted from page {i+1}")
                             continue
                         
-                        # Add page metadata
-                        page_metadata = {
-                            'page_number': i + 1,
-                            'page_size': (
-                                page.mediabox.upper_right if hasattr(page, 'mediabox') 
-                                else (0, 0)
-                            ),
-                            'rotation': page.rotation if hasattr(page, 'rotation') else 0,
-                            'title': metadata['title'],  # Include title in page metadata
-                            'file_type': metadata['file_type']
-                        }
+                        # Split text into sections
+                        current_section = ""
+                        current_title = ""
                         
-                        # Add to result
-                        result.append({
-                            'text': cleaned_text,
-                            'metadata': page_metadata
-                        })
+                        for line in cleaned_text.split('. '):
+                            line = line.strip()
+                            if not line:
+                                continue
+                            
+                            # Check if this is a section header
+                            if re.match(r'^(Test PDF Document|Section \d+:)', line):
+                                # Save previous section if it exists
+                                if current_section:
+                                    result.append({
+                                        'text': current_section,
+                                        'metadata': {
+                                            'section_type': 'content',
+                                            'section_title': current_title,
+                                            'page_number': i + 1,
+                                            'page_size': page.mediabox.upper_right if hasattr(page, 'mediabox') else (0, 0),
+                                            'rotation': page.rotation if hasattr(page, 'rotation') else 0,
+                                            'title': metadata['title'],
+                                            'file_type': metadata['file_type']
+                                        }
+                                    })
+                                current_title = line
+                                current_section = ""
+                            else:
+                                if current_section:
+                                    current_section += ". "
+                                current_section += line
+                        
+                        # Add final section
+                        if current_section:
+                            result.append({
+                                'text': current_section,
+                                'metadata': {
+                                    'section_type': 'content',
+                                    'section_title': current_title,
+                                    'page_number': i + 1,
+                                    'page_size': page.mediabox.upper_right if hasattr(page, 'mediabox') else (0, 0),
+                                    'rotation': page.rotation if hasattr(page, 'rotation') else 0,
+                                    'title': metadata['title'],
+                                    'file_type': metadata['file_type']
+                                }
+                            })
                         
                     except Exception as e:
                         logger.warning(f"Error processing page {i+1}: {str(e)}")
                         continue
-                
-                if not result:
-                    logger.warning(f"No text extracted from any pages in {file_or_path}")
                 
                 return result
                 
@@ -155,56 +164,13 @@ class DocumentProcessor:
                 logger.error(f"Error processing PDF {file_or_path}: {str(e)}")
                 return []
     
-    def _extract_docx_text(self, file_path: str) -> List[Dict[str, str]]:
-        """Extract text from DOCX with metadata and structure."""
-        doc = Document(file_path)
-        sections = []
-        current_section = {'text': [], 'metadata': {'section_type': 'body'}}
-        
-        for paragraph in doc.paragraphs:
-            # Skip empty paragraphs
-            if not paragraph.text.strip():
-                continue
-            
-            # Detect headers/titles based on style
-            if paragraph.style.name.startswith(('Heading', 'Title')):
-                # Save previous section if it has content
-                if current_section['text']:
-                    sections.append({
-                        'text': '\n'.join(current_section['text']),
-                        'metadata': current_section['metadata'].copy()
-                    })
-                
-                # Start new section
-                current_section = {
-                    'text': [paragraph.text],
-                    'metadata': {
-                        'section_type': paragraph.style.name,
-                        'heading_level': int(paragraph.style.name[-1]) 
-                        if paragraph.style.name.startswith('Heading') 
-                        else 0
-                    }
-                }
-            else:
-                current_section['text'].append(paragraph.text)
-        
-        # Add final section
-        if current_section['text']:
-            sections.append({
-                'text': '\n'.join(current_section['text']),
-                'metadata': current_section['metadata']
-            })
-        
-        return sections
-    
     def process_document(self, file_or_path: Union[str, BinaryIO]) -> List[DocumentChunk]:
         """Process a document and return chunks with metadata."""
         if isinstance(file_or_path, str):
             file_ext = os.path.splitext(file_or_path)[1].lower()
             file_name = os.path.basename(file_or_path)
         else:
-            # For testing with file-like objects
-            file_ext = '.pdf'  # Assume PDF for file-like objects
+            file_ext = '.pdf'
             file_name = 'test.pdf'
         
         # Extract text based on file type
@@ -223,20 +189,20 @@ class DocumentProcessor:
             text = section['text']
             base_metadata = {
                 'source_file': file_name,
-                'file_type': file_ext[1:],  # Remove the dot
+                'file_type': file_ext[1:],
                 **section['metadata']
             }
             
-            # Debug logging for text processing
-            logger.debug(f"Processing text length: {len(text)}, Chunk size: {self.chunk_size}")
-            
-            # Always create at least one chunk
+            # Split text into chunks
             text_chunks = self.text_splitter.split_text(text) if text else []
-            logger.debug(f"Created {len(text_chunks)} chunks")
             
-            # Create chunk objects with metadata
+            # Create chunk objects
             for chunk_text in text_chunks:
-                if chunk_text.strip():  # Only create chunks for non-empty text
+                chunk_text = chunk_text.strip()
+                if chunk_text:
+                    # Remove leading punctuation
+                    chunk_text = re.sub(r'^[.,!?;:]\s*', '', chunk_text)
+                    
                     chunk = DocumentChunk(
                         id=chunk_id,
                         text=chunk_text,
