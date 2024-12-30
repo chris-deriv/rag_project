@@ -1,10 +1,23 @@
 #!/bin/bash
 
-# Create data directory structure
-mkdir -p data/{chroma_db,model_cache,huggingface_cache,tiktoken_cache,torch_cache}
+# This script sets up data directories for local development and testing.
+# When running in Docker, these directories are not needed as Docker volumes are used instead.
 
-# Set permissions for current user
-chmod -R 755 data
+echo "Creating data directories for local development..."
 
-echo "Data directories created and permissions set"
-ls -la data/
+# Create base data directory
+mkdir -p data
+
+# Create subdirectories for different caches
+mkdir -p data/chroma_db
+mkdir -p data/model_cache
+mkdir -p data/huggingface_cache
+mkdir -p data/tiktoken_cache
+mkdir -p data/torch_cache
+
+# Create uploads directory
+mkdir -p uploads
+
+echo "Data directories created successfully."
+echo "Note: These directories are only needed for local development."
+echo "When running with Docker, managed volumes will be used instead."

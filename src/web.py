@@ -15,6 +15,9 @@ if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
 
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+# Configure JSON formatting
+app.config['JSONIFY_PRETTYPRINT_REGULAR'] = True
+app.json.sort_keys = False  # Preserve key order in JSON responses
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
@@ -183,4 +186,4 @@ def get_document_chunks(source_name):
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(host='0.0.0.0', port=3000)

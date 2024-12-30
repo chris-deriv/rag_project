@@ -289,52 +289,67 @@ class DocumentProcessor:
                         if not cleaned_text:
                             continue
                         
-                        # Split text into sections
-                        current_section = ""
-                        current_title = ""
+                        # Split text into lines and process each line
+                        lines = cleaned_text.split('\n')
+                        sections = []
+                        current_section = {"text": [], "title": "", "type": "content"}
                         
-                        for line in cleaned_text.split('. '):
+                        for line in lines:
                             line = line.strip()
                             if not line:
                                 continue
                             
                             # Check if this is a section header
-                            if re.match(r'^(Test PDF Document|Section \d+:)', line):
-                                # Save previous section if it exists
-                                if current_section:
-                                    section_metadata = metadata.copy()  # Start with document-level metadata
-                                    section_metadata.update({  # Add section-specific metadata
-                                        'section_type': 'content',
-                                        'section_title': current_title,
+                            is_header = (
+                                re.match(r'^(?:(?:\d+\.)*\d+\s+|\bSection\s+\d+:|\bChapter\s+\d+:?|\b(?:Introduction|Abstract|Conclusion|Summary|Background|Methods|Results|Discussion)\b)', line, re.IGNORECASE) or
+                                (len(line) < 100 and  # Not too long
+                                 re.match(r'^[A-Z]', line) and  # Starts with capital letter
+                                 not re.search(r'[.!?]$', line) and  # No sentence endings
+                                 not re.match(r'^(?:(?:The|A|An|This|That|These|Those)\s+)', line))  # Not starting with articles
+                            )
+                            
+                            if is_header:
+                                # Save previous section if it has content
+                                if current_section["text"]:
+                                    section_metadata = metadata.copy()
+                                    section_metadata.update({
+                                        'section_type': current_section["type"],
+                                        'section_title': current_section["title"],
                                         'page_number': i + 1,
                                         'page_size': page.mediabox.upper_right if hasattr(page, 'mediabox') else (0, 0),
                                         'rotation': page.rotation if hasattr(page, 'rotation') else 0
                                     })
-                                    result.append({
-                                        'text': current_section,
+                                    sections.append({
+                                        'text': ' '.join(current_section["text"]),
                                         'metadata': section_metadata
                                     })
-                                current_title = line
-                                current_section = ""
+                                
+                                # Start new section
+                                current_section = {
+                                    "text": [],
+                                    "title": line,
+                                    "type": "heading"
+                                }
                             else:
-                                if current_section:
-                                    current_section += ". "
-                                current_section += line
+                                current_section["text"].append(line)
                         
                         # Add final section
-                        if current_section:
-                            section_metadata = metadata.copy()  # Start with document-level metadata
-                            section_metadata.update({  # Add section-specific metadata
-                                'section_type': 'content',
-                                'section_title': current_title,
+                        if current_section["text"]:
+                            section_metadata = metadata.copy()
+                            section_metadata.update({
+                                'section_type': current_section["type"],
+                                'section_title': current_section["title"],
                                 'page_number': i + 1,
                                 'page_size': page.mediabox.upper_right if hasattr(page, 'mediabox') else (0, 0),
                                 'rotation': page.rotation if hasattr(page, 'rotation') else 0
                             })
-                            result.append({
-                                'text': current_section,
+                            sections.append({
+                                'text': ' '.join(current_section["text"]),
                                 'metadata': section_metadata
                             })
+                        
+                        # Add all sections from this page
+                        result.extend(sections)
                         
                     except Exception as e:
                         logger.warning(f"Error processing page {i+1}: {str(e)}")

@@ -32,32 +32,7 @@ services:
 
 volumes:
   chroma_data:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${PWD}/data/chroma_db
   model_cache:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${PWD}/data/model_cache
   huggingface_cache:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${PWD}/data/huggingface_cache
   tiktoken_cache:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${PWD}/data/tiktoken_cache
   torch_cache:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${PWD}/data/torch_cache
