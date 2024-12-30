@@ -21,6 +21,14 @@ def allowed_file(filename):
 # Initialize RAG application
 rag_app = RAGApplication()
 
+# Index existing documents on startup
+try:
+    existing_documents = get_documents()
+    if existing_documents:
+        rag_app.index_documents(existing_documents)
+except Exception as e:
+    app.logger.error(f"Error indexing existing documents on startup: {str(e)}")
+
 @app.route('/upload', methods=['POST'])
 def upload_file():
     if 'file' not in request.files:

@@ -7,13 +7,19 @@ services:
       - "3000:5000"
     volumes:
       - chroma_data:/app/chroma_db
+      - model_cache:/app/model_cache
       - ./uploads:/app/uploads
     env_file:
       - .env
     environment:
       - FLASK_APP=src.web:app
       - FLASK_ENV=development
+    user: "1000:1000"  # Match the appuser UID:GID
 
 volumes:
   chroma_data:
     name: rag_chroma_data
+    driver: local
+  model_cache:
+    name: rag_model_cache
+    driver: local

@@ -1,5 +1,9 @@
+import os
 from sentence_transformers import SentenceTransformer
 from config.settings import EMBEDDING_MODEL_NAME
+
+# Set cache directory for sentence-transformers
+os.environ['SENTENCE_TRANSFORMERS_HOME'] = '/app/model_cache'
 
 class EmbeddingGenerator:
     def __init__(self):
