@@ -67,7 +67,15 @@ def chat():
         return jsonify({'error': 'No query provided'}), 400
     
     try:
-        response = rag_app.query_documents(data['query'])
+        # Extract optional document filters
+        source_name = data.get('source_name')
+        title = data.get('title')
+        
+        response = rag_app.query_documents(
+            data['query'],
+            source_name=source_name,
+            title=title
+        )
         return jsonify({'response': response})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -104,6 +112,7 @@ def list_document_names():
         [
             {
                 "source_name": "example.pdf",
+                "title": "Example Document",
                 "chunk_count": 10,
                 "total_chunks": 10
             },
@@ -113,6 +122,34 @@ def list_document_names():
     try:
         documents = vector_db.list_document_names()
         return jsonify(documents)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/search-titles', methods=['GET'])
+def search_titles():
+    """
+    Search for documents with similar titles.
+    
+    Query Parameters:
+        q: The title search query
+        
+    Returns:
+        JSON array of matching documents:
+        [
+            {
+                "title": "Example Document",
+                "source_name": "example.pdf"
+            },
+            ...
+        ]
+    """
+    query = request.args.get('q', '')
+    if not query:
+        return jsonify({'error': 'No search query provided'}), 400
+    
+    try:
+        matches = vector_db.search_titles(query)
+        return jsonify(matches)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -130,8 +167,11 @@ def get_document_chunks(source_name):
             {
                 "id": "chunk1",
                 "text": "Content of chunk 1",
+                "title": "Example Document",
                 "chunk_index": 0,
-                "total_chunks": 10
+                "total_chunks": 10,
+                "section_title": "Introduction",
+                "section_type": "heading"
             },
             ...
         ]

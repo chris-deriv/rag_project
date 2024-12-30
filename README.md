@@ -40,6 +40,10 @@
   - LLM-based re-ranking for improved relevance
   - Weighted scoring combining vector similarity and LLM relevance
   - Robust error handling and fallback mechanisms
+  - Title-based search with fuzzy matching:
+    - Case-insensitive partial matching
+    - Document filtering by title or filename
+    - Combined semantic and title-based search
   
 - Query Processing:
   - Natural language querying of document content
@@ -51,6 +55,7 @@
   - Source citations for response traceability
   - Configurable response length (up to 1000 tokens)
   - Balanced temperature settings for natural yet consistent responses
+  - Document-specific querying with title/filename filters
   
 - System Features:
   - RESTful API for easy integration
@@ -107,9 +112,30 @@ The system exposes several REST endpoints for document management and querying:
   - Get collection metadata including document counts
   - Returns collection-level statistics
 
+- `GET /search-titles?q=<query>`
+  - Search for documents by title (fuzzy matching)
+  - Returns:
+    ```json
+    [
+      {
+        "title": "Python Programming Guide",
+        "source_name": "guide.pdf"
+      }
+    ]
+    ```
+
 ### Query Interface
 - `POST /chat`
   - Query documents using natural language
+  - Optional document filtering by title or filename
+  - Request format:
+    ```json
+    {
+      "query": "What is this about?",
+      "title": "python",        // Optional: filter by title (partial match)
+      "source_name": "guide.pdf" // Optional: filter by filename (exact match)
+    }
+    ```
   - Returns AI-generated responses with source citations
   - Preserves document structure and section context in responses
 
@@ -125,23 +151,60 @@ CHROMA_COLLECTION_NAME=your_collection_name
 
 ## Installation
 
+### Local Development
+
 1. Clone the repository
-2. Install dependencies:
+2. Set up data directories:
+   ```bash
+   ./setup_data_dirs.sh
+   ```
+3. Install dependencies:
    ```bash
    pip install -r requirements.txt
    ```
-3. Set up environment variables
-4. Run the application:
+4. Set up environment variables in .env file
+5. Run the application:
    ```bash
    python src/app.py
    ```
+
+### Docker Deployment
+
+1. Clone the repository
+2. Set up environment variables in .env file
+3. Start the application:
+   ```bash
+   docker compose up -d
+   ```
+4. To stop and clean up:
+   ```bash
+   docker compose down -v
+   ```
+
+## Data Storage
+
+### Local Development
+- Data is stored in local directories under ./data/
+- Cache directories are created by setup_data_dirs.sh
+- Manual cleanup required if needed
+
+### Docker Environment
+- Data is stored in Docker named volumes
+- Volumes are automatically managed by Docker
+- Use `docker compose down -v` to clean up all data
+- Uploads directory is mounted from local ./uploads/
 
 ## Usage
 
 1. Start the server
 2. Upload documents via POST /upload
 3. Query documents via POST /chat
-4. Explore documents using the document management endpoints
+   - Use title/filename filters for targeted queries
+   - Combine with semantic search for best results
+4. Explore documents using:
+   - GET /search-titles for finding documents
+   - GET /document-chunks for viewing content
+   - GET /document-names for listing all documents
 
 ## Development
 
@@ -152,4 +215,3 @@ CHROMA_COLLECTION_NAME=your_collection_name
 - Format code:
   ```bash
   black .
-  ```

@@ -1,7 +1,8 @@
 import chromadb
 from chromadb.config import Settings
 from config.settings import CHROMA_COLLECTION_NAME, CHROMA_PERSIST_DIR
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
+import numpy as np
 
 class VectorDatabase:
     def __init__(self):
@@ -18,7 +19,7 @@ class VectorDatabase:
                 Each document should have:
                 - id: Unique identifier for the document
                 - text: The document text
-                - embedding: The pre-computed embedding vector
+                - embedding: The pre-computed embedding vector (numpy array)
                 - source_name: Name/title of the source document
                 - title: Document title
                 - chunk_index: Index of this chunk in the document
@@ -56,26 +57,98 @@ class VectorDatabase:
         except Exception as e:
             raise Exception(f"Error adding documents to vector database: {str(e)}")
 
-    def query(self, query_embedding: List[float], n_results: int = 5) -> Dict[str, Any]:
+    def query(self, 
+             query_embedding: np.ndarray, 
+             n_results: int = 5,
+             source_name: Optional[str] = None,
+             title: Optional[str] = None) -> Dict[str, Any]:
         """
-        Query the vector database for similar documents.
+        Query the vector database for similar documents with optional filtering.
         
         Args:
-            query_embedding: The embedding vector of the query
+            query_embedding: The embedding vector of the query (numpy array)
             n_results: Number of results to return (default: 5)
+            source_name: Optional filter by source filename (exact match)
+            title: Optional filter by document title (partial match)
             
         Returns:
             Dict containing query results with ids, distances, and metadatas
         """
         try:
-            results = self.collection.query(
-                query_embeddings=[query_embedding.tolist()],
-                n_results=n_results,
-                include=['metadatas', 'distances', 'documents']
-            )
+            # Build where clause for filtering
+            where = {}
+            where_document = {}
+            
+            if source_name:
+                where["source_name"] = source_name
+            
+            if title:
+                # Use $contains operator for partial title matching
+                where["title"] = {"$contains": title.lower()}
+            
+            # Execute query with filters if any are specified
+            if where:
+                results = self.collection.query(
+                    query_embeddings=[query_embedding.tolist()],
+                    n_results=n_results,
+                    where=where,
+                    include=['metadatas', 'distances', 'documents']
+                )
+            else:
+                results = self.collection.query(
+                    query_embeddings=[query_embedding.tolist()],
+                    n_results=n_results,
+                    include=['metadatas', 'distances', 'documents']
+                )
             return results
         except Exception as e:
             raise Exception(f"Error querying vector database: {str(e)}")
+
+    def search_titles(self, title_query: str) -> List[Dict[str, Any]]:
+        """
+        Search for documents with similar titles.
+        
+        Args:
+            title_query: Partial title to search for
+            
+        Returns:
+            List of documents with matching titles
+        """
+        try:
+            # Return empty list for empty queries
+            if not title_query.strip():
+                return []
+                
+            # Get all documents
+            all_docs = self.collection.get(include=['metadatas'])
+            
+            # Create a set to track unique titles we've found
+            found_titles = set()
+            matches = []
+            
+            # Convert query to lowercase for case-insensitive matching
+            title_query = title_query.lower()
+            
+            # Check each document's title
+            for metadata in all_docs['metadatas']:
+                title = metadata.get('title', '').lower()
+                source_name = metadata.get('source_name', '')
+                
+                # Skip if we've already found this title
+                if (title, source_name) in found_titles:
+                    continue
+                
+                # Check if query is contained in the title
+                if title_query in title:
+                    found_titles.add((title, source_name))
+                    matches.append({
+                        'title': metadata.get('title', ''),
+                        'source_name': source_name
+                    })
+            
+            return matches
+        except Exception as e:
+            raise Exception(f"Error searching titles: {str(e)}")
 
     def get_metadata(self) -> Dict[str, Any]:
         """

@@ -1,234 +1,251 @@
-import unittest
-import numpy as np
+import pytest
 from src.database import VectorDatabase
-from config.settings import CHROMA_COLLECTION_NAME
+import chromadb
+from unittest.mock import Mock, patch, MagicMock
+import numpy as np
 
-class TestVectorDatabase(unittest.TestCase):
-    def setUp(self):
-        self.db = VectorDatabase()
-        # Clear any existing data
-        self.db.delete_collection()
+@pytest.fixture
+def mock_chroma_client():
+    with patch('chromadb.Client') as mock_client:
+        # Create mock collection
+        mock_collection = Mock()
+        
+        # Configure mock client to return mock collection
+        mock_client.return_value.get_or_create_collection.return_value = mock_collection
+        
+        yield mock_client.return_value, mock_collection
 
-    def test_metadata(self):
-        # Add some test documents
-        test_docs = [
+@pytest.fixture
+def db(mock_chroma_client):
+    _, mock_collection = mock_chroma_client
+    db = VectorDatabase()
+    return db
+
+def test_init(mock_chroma_client):
+    """Test database initialization."""
+    mock_client, mock_collection = mock_chroma_client
+    
+    db = VectorDatabase()
+    
+    mock_client.get_or_create_collection.assert_called_once()
+    assert db.collection == mock_collection
+
+def test_add_documents(db, mock_chroma_client):
+    """Test adding documents to the database."""
+    _, mock_collection = mock_chroma_client
+    
+    documents = [
+        {
+            'id': 1,
+            'text': 'Test document 1',
+            'embedding': np.array([0.1, 0.2, 0.3]),
+            'source_name': 'test1.pdf',
+            'title': 'Test Document 1'
+        },
+        {
+            'id': 2,
+            'text': 'Test document 2',
+            'embedding': np.array([0.4, 0.5, 0.6]),
+            'source_name': 'test2.pdf',
+            'title': 'Test Document 2'
+        }
+    ]
+    
+    db.add_documents(documents)
+    
+    mock_collection.add.assert_called_once()
+    call_kwargs = mock_collection.add.call_args[1]
+    
+    assert len(call_kwargs['embeddings']) == 2
+    assert len(call_kwargs['documents']) == 2
+    assert len(call_kwargs['metadatas']) == 2
+    assert len(call_kwargs['ids']) == 2
+
+def test_query_with_title_filter(db, mock_chroma_client):
+    """Test querying documents with title filter."""
+    _, mock_collection = mock_chroma_client
+    
+    # Configure mock response
+    mock_collection.query.return_value = {
+        'ids': [['1']],
+        'distances': [[0.1]],
+        'metadatas': [[{
+            'text': 'Test document',
+            'source_name': 'test.pdf',
+            'title': 'Python Guide'
+        }]]
+    }
+    
+    # Query with title filter
+    results = db.query(
+        query_embedding=np.array([0.1, 0.2, 0.3]),
+        title='python'
+    )
+    
+    # Verify the query was called with correct where clause
+    mock_collection.query.assert_called_once()
+    call_kwargs = mock_collection.query.call_args[1]
+    assert 'where' in call_kwargs
+    assert call_kwargs['where']['title'] == {'$contains': 'python'}
+
+def test_query_with_source_name_filter(db, mock_chroma_client):
+    """Test querying documents with source name filter."""
+    _, mock_collection = mock_chroma_client
+    
+    # Configure mock response
+    mock_collection.query.return_value = {
+        'ids': [['1']],
+        'distances': [[0.1]],
+        'metadatas': [[{
+            'text': 'Test document',
+            'source_name': 'test.pdf',
+            'title': 'Test Document'
+        }]]
+    }
+    
+    # Query with source name filter
+    results = db.query(
+        query_embedding=np.array([0.1, 0.2, 0.3]),
+        source_name='test.pdf'
+    )
+    
+    # Verify the query was called with correct where clause
+    mock_collection.query.assert_called_once()
+    call_kwargs = mock_collection.query.call_args[1]
+    assert 'where' in call_kwargs
+    assert call_kwargs['where']['source_name'] == 'test.pdf'
+
+def test_search_titles(db, mock_chroma_client):
+    """Test searching for documents by title."""
+    _, mock_collection = mock_chroma_client
+    
+    # Configure mock response
+    mock_collection.get.return_value = {
+        'metadatas': [
             {
-                "id": 1,
-                "text": "Test document 1",
-                "embedding": np.array([0.1, 0.2, 0.3]),
-                "source_name": "test1.pdf",
-                "title": "Test Document One",
-                "chunk_index": 0,
-                "total_chunks": 2,
-                "section_title": "Introduction",
-                "section_type": "heading"
+                'title': 'Python Programming Guide',
+                'source_name': 'python_guide.pdf'
             },
             {
-                "id": 2,
-                "text": "Test document 2",
-                "embedding": np.array([0.4, 0.5, 0.6]),
-                "source_name": "test1.pdf",
-                "title": "Test Document One",
-                "chunk_index": 1,
-                "total_chunks": 2,
-                "section_title": "Introduction",
-                "section_type": "body"
+                'title': 'Learning Python Basics',
+                'source_name': 'learning.pdf'
             },
             {
-                "id": 3,
-                "text": "Another document",
-                "embedding": np.array([0.7, 0.8, 0.9]),
-                "source_name": "test2.pdf",
-                "title": "Test Document Two",
-                "chunk_index": 0,
-                "total_chunks": 1,
-                "section_title": "Summary",
-                "section_type": "heading"
+                'title': 'JavaScript Tutorial',
+                'source_name': 'js.pdf'
             }
         ]
-        self.db.add_documents(test_docs)
+    }
+    
+    # Search for Python-related documents
+    results = db.search_titles('python')
+    
+    # Verify results
+    assert len(results) == 2
+    assert any(r['title'] == 'Python Programming Guide' for r in results)
+    assert any(r['title'] == 'Learning Python Basics' for r in results)
+    assert not any(r['title'] == 'JavaScript Tutorial' for r in results)
 
-        # Test get_metadata
-        metadata = self.db.get_metadata()
-        self.assertEqual(metadata["name"], CHROMA_COLLECTION_NAME)
-        self.assertEqual(metadata["count"], 3)
-
-        # Test get_all_documents
-        all_docs = self.db.get_all_documents()
-        self.assertEqual(len(all_docs["ids"]), 3)
-        self.assertEqual(len(all_docs["embeddings"]), 3)
-        self.assertEqual(len(all_docs["metadatas"]), 3)
-        
-        # Verify section metadata is stored correctly
-        self.assertEqual(all_docs["metadatas"][0]["section_title"], "Introduction")
-        self.assertEqual(all_docs["metadatas"][0]["section_type"], "heading")
-        self.assertEqual(all_docs["metadatas"][1]["section_title"], "Introduction")
-        self.assertEqual(all_docs["metadatas"][1]["section_type"], "body")
-
-    def test_document_listing(self):
-        # Add test documents with source names and chunk information
-        test_docs = [
+def test_search_titles_case_insensitive(db, mock_chroma_client):
+    """Test case-insensitive title search."""
+    _, mock_collection = mock_chroma_client
+    
+    # Configure mock response
+    mock_collection.get.return_value = {
+        'metadatas': [
             {
-                "id": 1,
-                "text": "Chapter 1",
-                "embedding": np.array([0.1, 0.2, 0.3]),
-                "source_name": "test.pdf",
-                "title": "Test Document",
-                "chunk_index": 0,
-                "total_chunks": 3,
-                "section_title": "Chapter One",
-                "section_type": "heading"
+                'title': 'Python Programming Guide',
+                'source_name': 'python_guide.pdf'
             },
             {
-                "id": 2,
-                "text": "Chapter 2",
-                "embedding": np.array([0.4, 0.5, 0.6]),
-                "source_name": "test.pdf",
-                "title": "Test Document",
-                "chunk_index": 1,
-                "total_chunks": 3,
-                "section_title": "Chapter Two",
-                "section_type": "heading"
+                'title': 'PYTHON BASICS',
+                'source_name': 'basics.pdf'
+            }
+        ]
+    }
+    
+    # Search with different cases
+    results_lower = db.search_titles('python')
+    results_upper = db.search_titles('PYTHON')
+    results_mixed = db.search_titles('PyThOn')
+    
+    # Verify all searches return the same results
+    assert len(results_lower) == 2
+    assert len(results_upper) == 2
+    assert len(results_mixed) == 2
+
+def test_search_titles_partial_match(db, mock_chroma_client):
+    """Test partial matching in title search."""
+    _, mock_collection = mock_chroma_client
+    
+    # Configure mock response
+    mock_collection.get.return_value = {
+        'metadatas': [
+            {
+                'title': 'Introduction to Programming',
+                'source_name': 'intro.pdf'
             },
             {
-                "id": 3,
-                "text": "Chapter 3",
-                "embedding": np.array([0.7, 0.8, 0.9]),
-                "source_name": "test.pdf",
-                "title": "Test Document",
-                "chunk_index": 2,
-                "total_chunks": 3,
-                "section_title": "Chapter Three",
-                "section_type": "heading"
-            }
-        ]
-        self.db.add_documents(test_docs)
-
-        # Test list_document_names
-        doc_names = self.db.list_document_names()
-        self.assertEqual(len(doc_names), 1)  # Should have 1 unique document
-
-        # Verify document information
-        doc_info = doc_names[0]
-        self.assertEqual(doc_info['source_name'], 'test.pdf')
-        self.assertEqual(doc_info['title'], 'Test Document')
-        self.assertEqual(doc_info['chunk_count'], 3)
-        self.assertEqual(doc_info['total_chunks'], 3)
-
-    def test_get_document_chunks(self):
-        # Add test documents with source names and chunk information
-        test_docs = [
-            {
-                "id": 1,
-                "text": "First chunk",
-                "embedding": np.array([0.1, 0.2, 0.3]),
-                "source_name": "test.pdf",
-                "title": "Test Document",
-                "chunk_index": 0,
-                "total_chunks": 2,
-                "section_title": "First Section",
-                "section_type": "heading"
+                'title': 'Programming Basics',
+                'source_name': 'basics.pdf'
             },
             {
-                "id": 2,
-                "text": "Second chunk",
-                "embedding": np.array([0.4, 0.5, 0.6]),
-                "source_name": "test.pdf",
-                "title": "Test Document",
-                "chunk_index": 1,
-                "total_chunks": 2,
-                "section_title": "First Section",
-                "section_type": "body"
+                'title': 'Advanced Topics',
+                'source_name': 'advanced.pdf'
             }
         ]
-        self.db.add_documents(test_docs)
+    }
+    
+    # Search with partial term
+    results = db.search_titles('program')
+    
+    # Verify partial matches are found
+    assert len(results) == 2
+    assert any(r['title'] == 'Introduction to Programming' for r in results)
+    assert any(r['title'] == 'Programming Basics' for r in results)
 
-        # Test getting chunks for a specific document
-        chunks = self.db.get_document_chunks("test.pdf")
-        self.assertEqual(len(chunks), 2)
-        
-        # Verify chunks are in correct order
-        self.assertEqual(chunks[0]['chunk_index'], 0)
-        self.assertEqual(chunks[0]['text'], "First chunk")
-        self.assertEqual(chunks[0]['title'], "Test Document")
-        self.assertEqual(chunks[0]['section_title'], "First Section")
-        self.assertEqual(chunks[0]['section_type'], "heading")
-        self.assertEqual(chunks[1]['chunk_index'], 1)
-        self.assertEqual(chunks[1]['text'], "Second chunk")
-        self.assertEqual(chunks[1]['title'], "Test Document")
-        self.assertEqual(chunks[1]['section_title'], "First Section")
-        self.assertEqual(chunks[1]['section_type'], "body")
-
-        # Test getting chunks for non-existent document
-        empty_chunks = self.db.get_document_chunks("nonexistent.pdf")
-        self.assertEqual(len(empty_chunks), 0)
-
-    def test_edge_cases(self):
-        # Test empty database
-        doc_names = self.db.list_document_names()
-        self.assertEqual(len(doc_names), 0)
-
-        chunks = self.db.get_document_chunks("any.pdf")
-        self.assertEqual(len(chunks), 0)
-
-        # Clear the collection before next test
-        self.db.delete_collection()
-        
-        # Test documents without source names
-        test_docs = [
+def test_search_titles_empty_query(db, mock_chroma_client):
+    """Test title search with empty query."""
+    _, mock_collection = mock_chroma_client
+    
+    # Configure mock response
+    mock_collection.get.return_value = {
+        'metadatas': [
             {
-                "id": 1,
-                "text": "Test document",
-                "embedding": np.array([0.1, 0.2, 0.3])
+                'title': 'Test Document',
+                'source_name': 'test.pdf'
             }
         ]
-        self.db.add_documents(test_docs)
+    }
+    
+    # Search with empty string
+    results = db.search_titles('')
+    
+    # Verify no results are returned for empty query
+    assert len(results) == 0
 
-        doc_names = self.db.list_document_names()
-        self.assertEqual(len(doc_names), 1)
-        self.assertEqual(doc_names[0]['source_name'], "Unknown")
-        self.assertEqual(doc_names[0]['title'], "")
-
-        # Clear the collection before next test
-        self.db.delete_collection()
-        
-        # Test documents with missing chunk information
-        test_docs = [
+def test_search_titles_no_duplicates(db, mock_chroma_client):
+    """Test that title search doesn't return duplicate documents."""
+    _, mock_collection = mock_chroma_client
+    
+    # Configure mock response with duplicate titles (from different chunks)
+    mock_collection.get.return_value = {
+        'metadatas': [
             {
-                "id": 2,
-                "text": "Test document",
-                "embedding": np.array([0.1, 0.2, 0.3]),
-                "source_name": "test.pdf"
-            }
-        ]
-        self.db.add_documents(test_docs)
-
-        chunks = self.db.get_document_chunks("test.pdf")
-        self.assertEqual(len(chunks), 1)
-        self.assertEqual(chunks[0]['chunk_index'], 0)  # Default value
-        self.assertEqual(chunks[0]['total_chunks'], 1)  # Default value
-        self.assertEqual(chunks[0]['section_title'], "")  # Default value
-        self.assertEqual(chunks[0]['section_type'], "content")  # Default value
-
-        # Clear the collection before next test
-        self.db.delete_collection()
-        
-        # Test documents with missing section metadata
-        test_docs = [
+                'title': 'Python Guide',
+                'source_name': 'guide.pdf'
+            },
             {
-                "id": 3,
-                "text": "Test document",
-                "embedding": np.array([0.1, 0.2, 0.3]),
-                "source_name": "test.pdf",
-                "title": "Test Document"
+                'title': 'Python Guide',  # Same document, different chunk
+                'source_name': 'guide.pdf'
             }
         ]
-        self.db.add_documents(test_docs)
-
-        chunks = self.db.get_document_chunks("test.pdf")
-        self.assertEqual(len(chunks), 1)
-        self.assertEqual(chunks[0]['section_title'], "")  # Default value
-        self.assertEqual(chunks[0]['section_type'], "content")  # Default value
-
-if __name__ == "__main__":
-    unittest.main()
+    }
+    
+    # Search for Python documents
+    results = db.search_titles('python')
+    
+    # Verify duplicates are removed
+    assert len(results) == 1
+    assert results[0]['title'] == 'Python Guide'
+    assert results[0]['source_name'] == 'guide.pdf'

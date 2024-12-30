@@ -1,4 +1,4 @@
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import logging
 from .embedding import EmbeddingGenerator
 from .database import VectorDatabase
@@ -89,13 +89,19 @@ class RAGApplication:
             )
         )
 
-    def query_documents(self, query: str, n_results: int = 5) -> str:
+    def query_documents(self, 
+                       query: str, 
+                       n_results: int = 5,
+                       source_name: Optional[str] = None,
+                       title: Optional[str] = None) -> str:
         """
         Process a query and return a response based on relevant documents.
         
         Args:
             query: The user's question
             n_results: Number of relevant documents to retrieve
+            source_name: Optional filter by source filename
+            title: Optional filter by document title
             
         Returns:
             str: Generated response based on relevant documents
@@ -106,8 +112,13 @@ class RAGApplication:
             # Generate embedding for the query
             query_embedding = self.embedder.generate_embeddings([query])[0]
             
-            # Retrieve relevant documents
-            results = self.vector_db.query(query_embedding, n_results=n_results)
+            # Retrieve relevant documents with optional filters
+            results = self.vector_db.query(
+                query_embedding, 
+                n_results=n_results,
+                source_name=source_name,
+                title=title
+            )
             
             # Extract contexts from results with source information
             contexts = []
