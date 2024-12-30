@@ -3,7 +3,7 @@ import logging
 from .embedding import EmbeddingGenerator
 from .database import VectorDatabase
 from .chatbot import Chatbot
-from .documents import sample_documents
+from .documents import get_documents
 
 logging.basicConfig(
     level=logging.INFO,
@@ -83,8 +83,8 @@ def main():
         # Initialize the application
         app = RAGApplication()
         
-        # Index the sample documents
-        app.index_documents(sample_documents)
+        # Index any existing documents
+        app.index_documents(get_documents())
         
         # Example query
         query = "How do I manage Python packages?"
