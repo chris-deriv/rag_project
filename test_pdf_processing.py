@@ -1,45 +1,30 @@
-from src.documents import DocumentProcessor
+import os
+from fpdf import FPDF
 
-def main():
-    print("Processing test.pdf...")
-    # Create processor with improved settings
-    processor = DocumentProcessor(
-        chunk_size=150,  # Even smaller chunks to respect section boundaries
-        chunk_overlap=50,  # Larger overlap to avoid splitting sentences
-        length_function="char"  # Character count for predictable chunks
-    )
+def create_test_pdf():
+    """Create a test PDF with a known title and content."""
+    pdf = FPDF()
     
-    # Override the text splitter's separators to better respect document structure
-    processor.text_splitter.separators = [
-        "\n\n",  # Paragraph breaks
-        "\n",    # Line breaks
-        ".",     # Sentence breaks
-        "!",     # Exclamation marks
-        "?",     # Question marks
-        ";",     # Semicolons
-        ":",     # Colons
-        " ",     # Words
-        ""       # Characters
-    ]
+    # Set document info
+    pdf.set_title("Test Document Title")
     
-    result = [
-        {
-            "id": chunk.id,
-            "text": chunk.text.strip(),  # Clean up any leading/trailing whitespace
-            **chunk.metadata
-        }
-        for chunk in processor.process_document('uploads/test.pdf')
-    ]
+    # Add a page
+    pdf.add_page()
     
-    print(f"\nFound {len(result)} chunks:\n")
-    for i, chunk in enumerate(result, 1):
-        print(f"Chunk {i}:")
-        print(f"Text: {chunk['text']}")
-        print(f"Metadata:")
-        for key, value in sorted(chunk.items()):  # Sort metadata keys for readability
-            if key != 'text':
-                print(f"  {key}: {value}")
-        print()
+    # Add title
+    pdf.set_font("Arial", "B", 16)
+    pdf.cell(0, 10, "Test Document Title", ln=True, align="C")
+    
+    # Add content
+    pdf.set_font("Arial", "", 12)
+    pdf.multi_cell(0, 10, "This is a test document.\n\nIt contains multiple paragraphs to test the chunking functionality.\n\nEach paragraph should be processed correctly.")
+    
+    # Save the file
+    output_path = "uploads/test.pdf"
+    os.makedirs("uploads", exist_ok=True)
+    pdf.output(output_path)
+    print(f"Created test PDF at: {output_path}")
+    return output_path
 
-if __name__ == '__main__':
-    main()
+if __name__ == "__main__":
+    create_test_pdf()

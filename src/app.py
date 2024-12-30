@@ -24,22 +24,70 @@ class RAGApplication:
         Index a list of documents into the vector database.
         
         Args:
-            documents: List of dictionaries, each containing 'id' and 'text' keys
+            documents: List of dictionaries containing document information
         """
         try:
             logger.info(f"Indexing {len(documents)} documents...")
             
             # Generate embeddings for all documents
+            processed_docs = []
             for doc in documents:
-                doc['embedding'] = self.embedder.generate_embeddings([doc['text']])[0]
+                # Extract metadata
+                metadata = {k: v for k, v in doc.items() if k not in ['id', 'text', 'embedding']}
+                source_name = metadata.get('source_file', 'Unknown')
+                title = metadata.get('title', '')
+                chunk_index = metadata.get('chunk_index', 0)
+                total_chunks = metadata.get('total_chunks', 1)
+                
+                logger.info(f"Processing document: {source_name}")
+                logger.info(f"Title: {title}")
+                logger.info(f"Chunk: {chunk_index + 1}/{total_chunks}")
+                
+                # Create processed document with metadata
+                processed_doc = {
+                    'id': doc['id'],
+                    'text': doc['text'],
+                    'embedding': self.embedder.generate_embeddings([doc['text']])[0],
+                    'source_name': source_name,
+                    'title': title,
+                    'chunk_index': chunk_index,
+                    'total_chunks': total_chunks
+                }
+                processed_docs.append(processed_doc)
+            
+            # Sort processed documents by ID for deterministic ordering
+            processed_docs.sort(key=lambda x: x['id'])
             
             # Add documents to vector database
-            self.vector_db.add_documents(documents)
-            logger.info("Documents indexed successfully")
+            if processed_docs:
+                logger.info(f"Adding {len(processed_docs)} documents to vector database")
+                self.vector_db.add_documents(processed_docs)
+                logger.info("Documents indexed successfully")
+            else:
+                logger.warning("No documents to index")
             
         except Exception as e:
             logger.error(f"Error indexing documents: {str(e)}")
             raise
+
+    def _sort_contexts(self, contexts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Sort contexts deterministically by source, title, and chunk index.
+        
+        Args:
+            contexts: List of context dictionaries
+            
+        Returns:
+            List of sorted context dictionaries
+        """
+        return sorted(
+            contexts,
+            key=lambda x: (
+                x.get('source', ''),
+                x.get('title', ''),
+                x.get('chunk_index', 0)
+            )
+        )
 
     def query_documents(self, query: str, n_results: int = 5) -> str:
         """
@@ -61,14 +109,23 @@ class RAGApplication:
             # Retrieve relevant documents
             results = self.vector_db.query(query_embedding, n_results=n_results)
             
-            # Extract contexts from results
-            contexts = [
-                {"text": metadata["text"]} 
-                for metadata in results["metadatas"][0]
-            ]
+            # Extract contexts from results with source information
+            contexts = []
+            for i, metadata in enumerate(results["metadatas"][0]):
+                context = {
+                    "text": metadata["text"],
+                    "source": metadata.get("source_name", "Unknown"),
+                    "title": metadata.get("title", ""),
+                    "chunk_index": metadata.get("chunk_index", 0),
+                    "total_chunks": metadata.get("total_chunks", 1)
+                }
+                contexts.append(context)
+            
+            # Sort contexts deterministically
+            sorted_contexts = self._sort_contexts(contexts)
             
             # Generate response with source citations
-            response = self.chatbot.generate_response_with_sources(contexts, query)
+            response = self.chatbot.generate_response_with_sources(sorted_contexts, query)
             
             logger.info("Query processed successfully")
             return response
@@ -84,7 +141,12 @@ def main():
         app = RAGApplication()
         
         # Index any existing documents
-        app.index_documents(get_documents())
+        documents = get_documents()
+        if documents:
+            logger.info(f"Found {len(documents)} documents to index")
+            app.index_documents(documents)
+        else:
+            logger.warning("No documents found to index")
         
         # Example query
         query = "How do I manage Python packages?"

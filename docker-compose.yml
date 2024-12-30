@@ -8,18 +8,56 @@ services:
     volumes:
       - chroma_data:/app/chroma_db
       - model_cache:/app/model_cache
+      - huggingface_cache:/app/cache/huggingface
+      - tiktoken_cache:/app/cache/tiktoken
+      - torch_cache:/app/cache/torch
       - ./uploads:/app/uploads
     env_file:
       - .env
     environment:
       - FLASK_APP=src.web:app
       - FLASK_ENV=development
+      - TRANSFORMERS_CACHE=/app/cache/huggingface
+      - TIKTOKEN_CACHE_DIR=/app/cache/tiktoken
+      - TORCH_HOME=/app/cache/torch
+      - SENTENCE_TRANSFORMERS_HOME=/app/model_cache
     user: "1000:1000"  # Match the appuser UID:GID
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '2'
+        reservations:
+          memory: 2G
 
 volumes:
   chroma_data:
-    name: rag_chroma_data
     driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${PWD}/data/chroma_db
   model_cache:
-    name: rag_model_cache
     driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${PWD}/data/model_cache
+  huggingface_cache:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${PWD}/data/huggingface_cache
+  tiktoken_cache:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${PWD}/data/tiktoken_cache
+  torch_cache:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${PWD}/data/torch_cache

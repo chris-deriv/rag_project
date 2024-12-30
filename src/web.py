@@ -94,5 +94,53 @@ def get_vector_documents():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/document-names', methods=['GET'])
+def list_document_names():
+    """
+    Get a list of all unique document names/titles with their chunk counts.
+    
+    Returns:
+        JSON array of documents with their names and chunk statistics:
+        [
+            {
+                "source_name": "example.pdf",
+                "chunk_count": 10,
+                "total_chunks": 10
+            },
+            ...
+        ]
+    """
+    try:
+        documents = vector_db.list_document_names()
+        return jsonify(documents)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/document-chunks/<source_name>', methods=['GET'])
+def get_document_chunks(source_name):
+    """
+    Get all chunks for a specific document, ordered by chunk index.
+    
+    Args:
+        source_name: Name/title of the document to retrieve chunks for
+        
+    Returns:
+        JSON array of chunks with their text and metadata:
+        [
+            {
+                "id": "chunk1",
+                "text": "Content of chunk 1",
+                "chunk_index": 0,
+                "total_chunks": 10
+            },
+            ...
+        ]
+    """
+    try:
+        chunks = vector_db.get_document_chunks(source_name)
+        return jsonify(chunks)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 if __name__ == '__main__':
     app.run(debug=True)
