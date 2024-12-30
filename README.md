@@ -55,6 +55,8 @@ A production-ready implementation of a Retrieval-Augmented Generation (RAG) syst
 
 ## Installation
 
+### Local Setup
+
 1. Clone the repository:
 ```bash
 git clone <repository-url>
@@ -76,6 +78,22 @@ pip install -r requirements.txt
 ```
 OPENAI_API_KEY=your_api_key_here
 ```
+
+### Docker Setup
+
+1. Make sure you have Docker and Docker Compose installed on your system.
+
+2. Create a `.env` file in the project root with your OpenAI API key:
+```
+OPENAI_API_KEY=your_api_key_here
+```
+
+3. Build and run the application using Docker Compose:
+```bash
+docker compose up
+```
+
+The application will be available at `http://localhost:3000`.
 
 ## Testing
 
@@ -116,7 +134,7 @@ The system provides a RESTful API for document management and querying:
    - Generates embeddings and stores in vector database
    - Handles duplicate uploads and maintains continuous chunk IDs
    ```bash
-   curl -X POST -F "file=@document.pdf" http://127.0.0.1:5000/upload
+   curl -X POST -F "file=@document.pdf" http://localhost:3000/upload
    ```
 
 2. **Query Documents** - `POST /chat`
@@ -126,7 +144,7 @@ The system provides a RESTful API for document management and querying:
    ```bash
    curl -X POST -H "Content-Type: application/json" \
         -d '{"query":"What are the main points of the document?"}' \
-        http://127.0.0.1:5000/chat
+        http://localhost:3000/chat
    ```
 
 3. **List Documents** - `GET /documents`
@@ -134,7 +152,7 @@ The system provides a RESTful API for document management and querying:
    - Shows chunk IDs and content
    - Useful for debugging and verification
    ```bash
-   curl http://127.0.0.1:5000/documents
+   curl http://localhost:3000/documents
    ```
 
 ### Document Processing Flow

@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  web:
+    build: .
+    ports:
+      - "3000:5000"
+    volumes:
+      - chroma_data:/app/chroma_db
+      - ./uploads:/app/uploads
+    env_file:
+      - .env
+    environment:
+      - FLASK_APP=src.web:app
+      - FLASK_ENV=development
+
+volumes:
+  chroma_data:
+    name: rag_chroma_data

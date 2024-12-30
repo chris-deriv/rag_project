@@ -1,11 +1,16 @@
 from typing import List
+import httpx
 from openai import OpenAI
 from config.settings import OPENAI_API_KEY
 
 class Chatbot:
     def __init__(self):
         """Initialize the chatbot with OpenAI API key."""
-        self.client = OpenAI(api_key=OPENAI_API_KEY)
+        http_client = httpx.Client()
+        self.client = OpenAI(
+            api_key=OPENAI_API_KEY,
+            http_client=http_client
+        )
         self.model = "gpt-3.5-turbo"  # Using the more modern chat model
 
     def generate_response(self, context: str, query: str) -> str:

@@ -1,8 +1,8 @@
 from flask import Flask, request, jsonify
 import os
 from werkzeug.utils import secure_filename
-from .app import RAGApplication
-from .documents import add_document, get_documents
+from src.app import RAGApplication
+from src.documents import add_document, get_documents
 
 app = Flask(__name__)
 
