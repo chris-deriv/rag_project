@@ -49,6 +49,39 @@ class VectorDatabase:
         except Exception as e:
             raise Exception(f"Error querying vector database: {str(e)}")
 
+    def get_metadata(self) -> Dict[str, Any]:
+        """
+        Get metadata about the collection.
+        
+        Returns:
+            Dict containing collection metadata including:
+            - name: Collection name
+            - count: Number of documents in collection
+            - metadata: Collection metadata
+        """
+        try:
+            count = self.collection.count()
+            metadata = {
+                "name": self.collection.name,
+                "count": count,
+                "metadata": self.collection.metadata
+            }
+            return metadata
+        except Exception as e:
+            raise Exception(f"Error getting collection metadata: {str(e)}")
+
+    def get_all_documents(self) -> Dict[str, Any]:
+        """
+        Get all documents and their metadata from the collection.
+        
+        Returns:
+            Dict containing all documents with their ids, embeddings, and metadata
+        """
+        try:
+            return self.collection.get()
+        except Exception as e:
+            raise Exception(f"Error getting all documents: {str(e)}")
+
     def delete_collection(self) -> None:
         """Delete the current collection from the database."""
         try:

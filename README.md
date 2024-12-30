@@ -5,7 +5,7 @@ A production-ready implementation of a Retrieval-Augmented Generation (RAG) syst
 ## Features
 
 - Document Processing:
-  - Support for PDF and DOCX file uploads
+  - Support for PDF (.pdf) and Word (.doc, .docx) file uploads
   - Intelligent document chunking by paragraphs
   - Automatic text extraction and preprocessing
   - Document embedding generation using Sentence Transformers
@@ -111,7 +111,8 @@ python -m pytest tests/ -v
 ```
 tests/
 ├── __init__.py
-└── test_documents.py    # Tests for document processing functionality
+├── test_documents.py    # Tests for document processing functionality
+└── test_database.py    # Tests for vector database operations
 ```
 
 The test suite includes:
@@ -119,6 +120,7 @@ The test suite includes:
 - Document ID generation and continuity
 - Document management (adding and retrieving)
 - Support for different file types (PDF, DOCX)
+- Vector database operations and metadata retrieval
 
 Tests use pytest's monkeypatch fixture to mock file processing functions, allowing for thorough testing without requiring actual document files.
 
@@ -129,12 +131,12 @@ The system provides a RESTful API for document management and querying:
 ### API Endpoints
 
 1. **Upload Document** - `POST /upload`
-   - Accepts PDF or DOCX files
+   - Accepts PDF (.pdf) and Word (.doc, .docx) files
    - Automatically processes and chunks the document
    - Generates embeddings and stores in vector database
    - Handles duplicate uploads and maintains continuous chunk IDs
    ```bash
-   curl -X POST -F "file=@/path/to/document.pdf" http://localhost:3000/upload
+   curl -X POST -F "file='path/to/document.pdf"' (see below for file content) http://localhost:3000/upload
    ```
 
 2. **Query Documents** - `POST /chat`
@@ -153,6 +155,34 @@ The system provides a RESTful API for document management and querying:
    - Useful for debugging and verification
    ```bash
    curl http://localhost:3000/documents
+   ```
+
+4. **Get Collection Metadata** - `GET /metadata`
+   - Retrieve metadata about the ChromaDB collection
+   - Shows collection name, document count, and collection metadata
+   - Useful for monitoring system state
+   ```bash
+   curl http://localhost:3000/metadata
+   # Returns:
+   # {
+   #     "name": "document_collection",
+   #     "count": 5,  # number of documents
+   #     "metadata": {}  # collection metadata
+   # }
+   ```
+
+5. **Get Vector Documents** - `GET /vector-documents`
+   - Retrieve all documents with their embeddings and metadata from ChromaDB
+   - Shows document IDs, embeddings, and associated metadata
+   - Useful for advanced analysis and debugging
+   ```bash
+   curl http://localhost:3000/vector-documents
+   # Returns:
+   # {
+   #     "ids": ["1", "2", ...],
+   #     "embeddings": [[0.1, 0.2, 0.3], ...],
+   #     "metadatas": [{"text": "document 1"}, ...]
+   # }
    ```
 
 ### Document Processing Flow
@@ -193,6 +223,7 @@ The system provides a RESTful API for document management and querying:
 - Semantic similarity search capabilities
 - Maintains document metadata
 - Handles batch operations
+- Provides collection metadata and document retrieval
 
 ### Chatbot
 - OpenAI GPT integration

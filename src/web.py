@@ -3,6 +3,7 @@ import os
 from werkzeug.utils import secure_filename
 from src.app import RAGApplication
 from src.documents import add_document, get_documents
+from src.database import VectorDatabase
 
 app = Flask(__name__)
 
@@ -18,8 +19,9 @@ app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-# Initialize RAG application
+# Initialize RAG application and vector database
 rag_app = RAGApplication()
+vector_db = VectorDatabase()
 
 # Index existing documents on startup
 try:
@@ -73,6 +75,24 @@ def chat():
 @app.route('/documents', methods=['GET'])
 def get_all_documents():
     return jsonify(get_documents())
+
+@app.route('/metadata', methods=['GET'])
+def get_collection_metadata():
+    """Get metadata about the ChromaDB collection."""
+    try:
+        metadata = vector_db.get_metadata()
+        return jsonify(metadata)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/vector-documents', methods=['GET'])
+def get_vector_documents():
+    """Get all documents with their embeddings and metadata from ChromaDB."""
+    try:
+        documents = vector_db.get_all_documents()
+        return jsonify(documents)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     app.run(debug=True)

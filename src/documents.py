@@ -4,7 +4,6 @@ import json
 from typing import List, Dict, Optional, BinaryIO, Union
 from dataclasses import dataclass, asdict
 import re
-from bs4 import BeautifulSoup
 from pypdf import PdfReader
 from docx import Document
 from langchain.text_splitter import RecursiveCharacterTextSplitter
