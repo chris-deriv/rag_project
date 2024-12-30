@@ -90,7 +90,7 @@ OPENAI_API_KEY=your_api_key_here
 
 3. Build and run the application using Docker Compose:
 ```bash
-docker compose up
+docker compose up -d
 ```
 
 The application will be available at `http://localhost:3000`.
@@ -134,7 +134,7 @@ The system provides a RESTful API for document management and querying:
    - Generates embeddings and stores in vector database
    - Handles duplicate uploads and maintains continuous chunk IDs
    ```bash
-   curl -X POST -F "file=@document.pdf" http://localhost:3000/upload
+   curl -X POST -F "file=@/path/to/document.pdf" http://localhost:3000/upload
    ```
 
 2. **Query Documents** - `POST /chat`
