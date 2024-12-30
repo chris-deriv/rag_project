@@ -14,12 +14,12 @@ A production-ready implementation of a Retrieval-Augmented Generation (RAG) syst
 ## Project Structure
 
 ```
-rag_project/
 │
 ├── config/
 │   └── settings.py      # Configuration settings
 │
 ├── src/
+│   ├── documents.py     # Document data source
 │   ├── embedding.py     # Embedding generation
 │   ├── database.py      # Vector database operations
 │   ├── chatbot.py       # OpenAI integration
@@ -39,7 +39,7 @@ rag_project/
 1. Clone the repository:
 ```bash
 git clone <repository-url>
-cd rag_project
+cd src
 ```
 
 2. Create and activate a virtual environment:
@@ -66,18 +66,18 @@ The system can be used either as a library or through the command-line interface
 
 ```python
 from src.app import RAGApplication
+from src.documents import sample_documents  # Import the sample documents
 
 # Initialize the application
 app = RAGApplication()
 
-# Index documents
-documents = [
-    {
-        "id": 1,
-        "text": "Your document text here"
-    }
-]
-app.index_documents(documents)
+# Index documents from documents.py
+# You can modify src/documents.py to add your own documents following this format:
+# {
+#     "id": unique_id,
+#     "text": "Your document text here"
+# }
+app.index_documents(sample_documents)
 
 # Query the system
 response = app.query_documents("Your question here")

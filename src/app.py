@@ -3,6 +3,7 @@ import logging
 from .embedding import EmbeddingGenerator
 from .database import VectorDatabase
 from .chatbot import Chatbot
+from .documents import sample_documents
 
 logging.basicConfig(
     level=logging.INFO,
@@ -82,24 +83,8 @@ def main():
         # Initialize the application
         app = RAGApplication()
         
-        # Sample documents
-        documents = [
-            {
-                "id": 1,
-                "text": "Python is a high-level programming language known for its simplicity and readability."
-            },
-            {
-                "id": 2,
-                "text": "Virtual environments in Python are isolated spaces where you can install specific package versions."
-            },
-            {
-                "id": 3,
-                "text": "The pip package manager is used to install Python packages from PyPI (Python Package Index)."
-            }
-        ]
-        
-        # Index the documents
-        app.index_documents(documents)
+        # Index the sample documents
+        app.index_documents(sample_documents)
         
         # Example query
         query = "How do I manage Python packages?"
