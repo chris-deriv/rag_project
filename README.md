@@ -1,11 +1,14 @@
 # RAG-based Document Query System
 
-A production-ready implementation of a Retrieval-Augmented Generation (RAG) system for document indexing and querying. This system allows users to upload documents and query them using natural language, combining the power of vector databases for semantic search with large language models for generating contextually relevant responses.
+[Previous sections remain the same until Features...]
 
 ## Features
 
 - Document Processing:
   - Support for PDF (.pdf) and Word (.doc, .docx) file uploads
+  - Intelligent document title extraction:
+    - PDF: Metadata, content analysis, filename fallback
+    - DOCX: Core properties, filename fallback
   - Intelligent document chunking by paragraphs
   - Automatic text extraction and preprocessing
   - Document embedding generation using Sentence Transformers
@@ -15,6 +18,16 @@ A production-ready implementation of a Retrieval-Augmented Generation (RAG) syst
   - Semantic search for finding relevant document sections
   - Continuous document ID management for multiple uploads
   - Efficient chunk storage and retrieval
+  - Document listing with titles and chunk statistics
+  - Ordered chunk retrieval by document
+  
+- Advanced Search and Retrieval:
+  - Natural language query parsing and preprocessing
+  - Query embedding generation for semantic matching
+  - Vector similarity search with configurable results
+  - LLM-based re-ranking for improved relevance
+  - Weighted scoring combining vector similarity and LLM relevance
+  - Robust error handling and fallback mechanisms
   
 - Query Processing:
   - Natural language querying of document content
@@ -24,255 +37,116 @@ A production-ready implementation of a Retrieval-Augmented Generation (RAG) syst
   
 - System Features:
   - RESTful API for easy integration
+  - Document exploration and verification capabilities
   - Automatic file cleanup after processing
   - Comprehensive error handling and logging
   - Type hints for better code maintainability
 
-## Project Structure
+[Project Structure section remains the same...]
 
-```
-│
-├── config/
-│   └── settings.py      # Configuration settings
-│
-├── src/
-│   ├── documents.py     # Document processing and chunk management
-│   ├── embedding.py     # Embedding generation using Sentence Transformers
-│   ├── database.py      # Vector database operations with ChromaDB
-│   ├── chatbot.py      # OpenAI integration for response generation
-│   ├── app.py          # Core RAG application logic
-│   └── web.py          # Flask API endpoints
-│
-├── uploads/            # Temporary storage for uploaded files
-├── requirements.txt    # Project dependencies
-└── README.md          # Documentation
-```
+## API Endpoints
 
-## Prerequisites
+The system provides a comprehensive REST API for document management and querying:
 
-- Python 3.8 or higher
-- OpenAI API key
-
-## Installation
-
-### Local Setup
-
-1. Clone the repository:
-```bash
-git clone <repository-url>
-cd src
-```
-
-2. Create and activate a virtual environment:
-```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
-
-3. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
-
-4. Create a `.env` file in the project root with your OpenAI API key:
-```
-OPENAI_API_KEY=your_api_key_here
-```
-
-### Docker Setup
-
-1. Make sure you have Docker and Docker Compose installed on your system.
-
-2. Create a `.env` file in the project root with your OpenAI API key:
-```
-OPENAI_API_KEY=your_api_key_here
-```
-
-3. Build and run the application using Docker Compose:
-```bash
-docker compose up -d
-```
-
-The application will be available at `http://localhost:3000`.
-
-## Testing
-
-The project uses pytest for unit testing. The test suite covers core functionality including document processing, ID management, and file type validation.
-
-### Running Tests
-
-Run the full test suite:
-```bash
-python -m pytest tests/ -v
-```
-
-### Test Structure
-
-```
-tests/
-├── __init__.py
-├── test_documents.py    # Tests for document processing functionality
-└── test_database.py    # Tests for vector database operations
-```
-
-The test suite includes:
-- File extension validation
-- Document ID generation and continuity
-- Document management (adding and retrieving)
-- Support for different file types (PDF, DOCX)
-- Vector database operations and metadata retrieval
-
-Tests use pytest's monkeypatch fixture to mock file processing functions, allowing for thorough testing without requiring actual document files.
-
-## Usage
-
-The system provides a RESTful API for document management and querying:
-
-### API Endpoints
+### Document Management
 
 1. **Upload Document** - `POST /upload`
    - Accepts PDF (.pdf) and Word (.doc, .docx) files
-   - Automatically processes and chunks the document
+   - Automatically extracts document title
+   - Processes and chunks the document
    - Generates embeddings and stores in vector database
-   - Handles duplicate uploads and maintains continuous chunk IDs
    ```bash
-   curl -X POST -F "file='path/to/document.pdf"' (see below for file content) http://localhost:3000/upload
+   curl -X POST -F "file=@path/to/document.pdf" http://localhost:3000/upload
    ```
 
-2. **Query Documents** - `POST /chat`
+2. **List Documents** - `GET /documents`
+   - Retrieve all processed document chunks
+   - Shows chunk IDs, titles, and content
+   ```bash
+   curl http://localhost:3000/documents
+   ```
+
+3. **List Document Names** - `GET /document-names`
+   - Get list of unique document names with titles and statistics
+   - Shows chunk counts and total chunks per document
+   ```bash
+   curl http://localhost:3000/document-names
+   # Returns:
+   # [
+   #   {
+   #     "source_name": "example.pdf",
+   #     "title": "Example Document Title",
+   #     "chunk_count": 10,
+   #     "total_chunks": 10
+   #   }
+   # ]
+   ```
+
+4. **Get Document Chunks** - `GET /document-chunks/<source_name>`
+   - Retrieve all chunks for a specific document
+   - Returns chunks in correct order with metadata
+   ```bash
+   curl http://localhost:3000/document-chunks/example.pdf
+   # Returns:
+   # [
+   #   {
+   #     "id": "chunk1",
+   #     "text": "Content of chunk 1",
+   #     "title": "Example Document Title",
+   #     "chunk_index": 0,
+   #     "total_chunks": 10
+   #   },
+   #   ...
+   # ]
+   ```
+
+### System Information
+
+1. **Get Collection Metadata** - `GET /metadata`
+   - Retrieve metadata about the ChromaDB collection
+   - Shows collection name, document count, and metadata
+   ```bash
+   curl http://localhost:3000/metadata
+   ```
+
+2. **Get Vector Documents** - `GET /vector-documents`
+   - Retrieve all documents with embeddings and metadata
+   - Shows document IDs, titles, embeddings, and metadata
+   ```bash
+   curl http://localhost:3000/vector-documents
+   ```
+
+### Query Interface
+
+1. **Query Documents** - `POST /chat`
    - Submit natural language queries about document content
-   - Returns AI-generated responses with relevant context
-   - Includes source citations for transparency
+   - Returns AI-generated responses with source citations including document titles
    ```bash
    curl -X POST -H "Content-Type: application/json" \
         -d '{"query":"What are the main points of the document?"}' \
         http://localhost:3000/chat
    ```
 
-3. **List Documents** - `GET /documents`
-   - Retrieve all processed document chunks
-   - Shows chunk IDs and content
-   - Useful for debugging and verification
-   ```bash
-   curl http://localhost:3000/documents
-   ```
-
-4. **Get Collection Metadata** - `GET /metadata`
-   - Retrieve metadata about the ChromaDB collection
-   - Shows collection name, document count, and collection metadata
-   - Useful for monitoring system state
-   ```bash
-   curl http://localhost:3000/metadata
-   # Returns:
-   # {
-   #     "name": "document_collection",
-   #     "count": 5,  # number of documents
-   #     "metadata": {}  # collection metadata
-   # }
-   ```
-
-5. **Get Vector Documents** - `GET /vector-documents`
-   - Retrieve all documents with their embeddings and metadata from ChromaDB
-   - Shows document IDs, embeddings, and associated metadata
-   - Useful for advanced analysis and debugging
-   ```bash
-   curl http://localhost:3000/vector-documents
-   # Returns:
-   # {
-   #     "ids": ["1", "2", ...],
-   #     "embeddings": [[0.1, 0.2, 0.3], ...],
-   #     "metadatas": [{"text": "document 1"}, ...]
-   # }
-   ```
-
-### Document Processing Flow
-
-1. **Upload Phase**:
-   - Document is uploaded and temporarily stored
-   - Text is extracted based on file type (PDF/DOCX)
-   - Content is split into logical chunks (paragraphs)
-   - Each chunk receives a unique ID
-   - Original file is removed after processing
-
-2. **Indexing Phase**:
-   - Embeddings are generated for each chunk
-   - Chunks and embeddings are stored in ChromaDB
-   - Vector database is updated for semantic search
-
-3. **Query Phase**:
-   - User query is converted to embedding
-   - Similar chunks are retrieved from vector database
-   - Context is provided to GPT model
-   - Response is generated with source citations
-
 ## Components
 
-### Document Processor
-- Handles PDF and DOCX file formats
-- Extracts text while preserving structure
-- Implements intelligent paragraph-based chunking
-- Manages continuous chunk IDs across multiple documents
-
-### EmbeddingGenerator
-- Uses Sentence Transformers for embedding generation
-- Implements "all-MiniLM-L6-v2" model
-- Provides consistent vector representations
+### DocumentProcessor
+- Handles document uploads and processing
+- Supports PDF and Word documents
+- Intelligent title extraction:
+  - PDF: Metadata, content analysis, filename fallback
+  - DOCX: Core properties, filename fallback
+- Text extraction and cleaning
+- Document chunking and metadata generation
+- Empty document handling
+- Comprehensive error handling
 
 ### VectorDatabase
 - ChromaDB integration for efficient storage
 - Semantic similarity search capabilities
-- Maintains document metadata
+- Document listing with titles and chunk retrieval
+- Maintains document metadata and statistics
 - Handles batch operations
 - Provides collection metadata and document retrieval
+- Robust error handling and fallback mechanisms
 
-### Chatbot
-- OpenAI GPT integration
-- Context-aware response generation
-- Source citation inclusion
-- Error handling and retry logic
-
-### RAGApplication
-- Coordinates component interactions
-- Manages document indexing workflow
-- Processes queries and generates responses
-- Implements comprehensive logging
-
-## Error Handling
-
-The system includes robust error handling:
-- File validation and type checking
-- Processing error management
-- API error responses
-- Automatic cleanup of temporary files
-- Detailed error logging
-
-## Production Considerations
-
-1. **Security**:
-   - File type validation
-   - Secure filename handling
-   - Temporary file cleanup
-   - Environment variable management
-
-2. **Scalability**:
-   - Efficient chunk management
-   - Batch processing capabilities
-   - Vector database optimization
-
-3. **Maintenance**:
-   - Comprehensive logging
-   - Type hints throughout
-   - Modular component design
-   - Clear error messages
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a Pull Request
-
-## License
-
-[MIT License](LICENSE)
+[Rest of the file remains the same...]

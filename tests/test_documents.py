@@ -37,80 +37,112 @@ def test_text_cleaning():
     clean_text = processor._clean_text(dirty_text)
     assert clean_text == "This has extra spaces and broken words"
 
-def test_pdf_processing_with_metadata(monkeypatch):
-    """Test PDF processing with metadata extraction."""
-    # Create mock extraction result
-    mock_result = [{
-        'text': "Test content for page one. This is a complete sentence.",
-        'metadata': {
-            'page_number': 1,
-            'page_size': (612, 792),
-            'rotation': 0,
-            'title': 'Test Document',
-            'file_type': 'pdf'
-        }
-    }]
+def test_pdf_title_from_metadata(monkeypatch):
+    """Test PDF title extraction from metadata."""
+    # Create mock PDF with metadata title
+    mock_metadata = {'/Title': 'Test Document Title'}
+    mock_pages = [Mock()]
+    mock_pages[0].extract_text.return_value = "Page content"
+    mock_pages[0].mediabox.upper_right = (612, 792)
+    mock_pages[0].rotation = 0
     
-    # Mock the _extract_pdf_text method
-    def mock_extract_pdf_text(self, file_or_path):
-        return mock_result
+    class MockPdfReader:
+        def __init__(self, *args, **kwargs):
+            self.metadata = mock_metadata
+            self.pages = mock_pages
     
-    monkeypatch.setattr(DocumentProcessor, "_extract_pdf_text", mock_extract_pdf_text)
+    monkeypatch.setattr("src.documents.PdfReader", MockPdfReader)
     
-    # Process document
     processor = DocumentProcessor()
     result = processor.process_document("test.pdf")
     
-    # Verify results
     assert len(result) > 0
-    assert result[0].metadata['page_number'] == 1
-    assert result[0].metadata['title'] == 'Test Document'
-    assert result[0].metadata['file_type'] == 'pdf'
-    assert "Test content for page one" in result[0].text
+    assert result[0].metadata['title'] == 'Test Document Title'
 
-# @patch('docx.Document')
-# def test_docx_processing_with_structure(mock_document):
-#     """Test DOCX processing with structure preservation."""
-#     # Create mock paragraphs with styles
-#     paragraphs = []
-#     test_data = [
-#         ("Document Title", "Title"),
-#         ("Section 1", "Heading 1"),
-#         ("Regular paragraph 1", "Normal"),
-#         ("Section 2", "Heading 1"),
-#         ("Regular paragraph 2", "Normal"),
-#     ]
-#     
-#     for text, style_name in test_data:
-#         paragraph = Mock()
-#         paragraph.text = text
-#         style = Mock()
-#         style.name = style_name
-#         paragraph.style = style
-#         paragraphs.append(paragraph)
-#     
-#     # Create mock document
-#     mock_doc = Mock()
-#     mock_doc.paragraphs = paragraphs
-#     mock_doc.part = Mock()  # Mock the part property
-#     mock_document.return_value = mock_doc
-#     
-#     # Create mock package
-#     mock_package = Mock()
-#     mock_package.main_document_part = Mock()
-#     mock_package.open = Mock(return_value=mock_package)
-#     
-#     # Process document
-#     with patch('os.path.exists', return_value=True), \
-#          patch('zipfile.is_zipfile', return_value=True), \
-#          patch('docx.opc.package', Mock(Package=Mock(open=Mock(return_value=mock_package)))):
-#         result = process_document("test.docx")
-#     
-#     # Verify structure preservation
-#     sections = [chunk for chunk in result if chunk.metadata.get('section_type', '').startswith(('Title', 'Heading'))]
-#     assert len(sections) > 0
-#     assert any(chunk.metadata.get('section_type') == 'Title' for chunk in sections)
-#     assert any(chunk.metadata.get('section_type') == 'Heading 1' for chunk in sections)
+def test_pdf_title_from_content(monkeypatch):
+    """Test PDF title extraction from first page content."""
+    # Create mock PDF without metadata title but with title in content
+    mock_metadata = {}
+    mock_pages = [Mock()]
+    mock_pages[0].extract_text.return_value = "Document Title\nThis is the content\nMore content"
+    mock_pages[0].mediabox.upper_right = (612, 792)
+    mock_pages[0].rotation = 0
+    
+    class MockPdfReader:
+        def __init__(self, *args, **kwargs):
+            self.metadata = mock_metadata
+            self.pages = mock_pages
+    
+    monkeypatch.setattr("src.documents.PdfReader", MockPdfReader)
+    
+    processor = DocumentProcessor()
+    result = processor.process_document("test.pdf")
+    
+    assert len(result) > 0
+    assert result[0].metadata['title'] == 'Document Title'
+
+def test_pdf_title_fallback_to_filename(monkeypatch):
+    """Test PDF title fallback to filename."""
+    # Create mock PDF without metadata title or content title
+    mock_metadata = {}
+    mock_pages = [Mock()]
+    # Use lowercase content to avoid it being detected as a title
+    mock_pages[0].extract_text.return_value = "just some content"
+    mock_pages[0].mediabox.upper_right = (612, 792)
+    mock_pages[0].rotation = 0
+    
+    class MockPdfReader:
+        def __init__(self, *args, **kwargs):
+            self.metadata = mock_metadata
+            self.pages = mock_pages
+    
+    monkeypatch.setattr("src.documents.PdfReader", MockPdfReader)
+    
+    processor = DocumentProcessor()
+    result = processor.process_document("test_document.pdf")
+    
+    assert len(result) > 0
+    assert result[0].metadata['title'] == 'test_document'
+
+def test_docx_title_from_properties(monkeypatch):
+    """Test DOCX title extraction from core properties."""
+    # Create mock DOCX with core properties title
+    mock_core_properties = Mock()
+    mock_core_properties.title = "Test DOCX Title"
+    mock_doc = Mock()
+    mock_doc.core_properties = mock_core_properties
+    mock_doc.paragraphs = []
+    
+    def mock_Document(*args, **kwargs):
+        return mock_doc
+    
+    monkeypatch.setattr("src.documents.Document", mock_Document)
+    
+    processor = DocumentProcessor()
+    result = processor.process_document("test.docx")
+    
+    assert len(result) > 0
+    assert result[0].metadata['title'] == 'Test DOCX Title'
+
+def test_docx_title_fallback_to_filename(monkeypatch):
+    """Test DOCX title fallback to filename."""
+    # Create mock DOCX without core properties title
+    mock_core_properties = Mock()
+    mock_core_properties.title = ""
+    mock_doc = Mock()
+    mock_doc.core_properties = mock_core_properties
+    mock_doc.paragraphs = []
+    
+    def mock_Document(*args, **kwargs):
+        return mock_doc
+    
+    monkeypatch.setattr("src.documents.Document", mock_Document)
+    
+    processor = DocumentProcessor()
+    result = processor.process_document("test_document.docx")
+    
+    assert len(result) > 0
+    assert result[0].metadata['title'] == 'test_document'
 
 def test_chunk_size_and_overlap():
     """Test chunk size and overlap settings."""
@@ -164,6 +196,7 @@ def test_metadata_in_get_documents(monkeypatch):
             text="test chunk",
             metadata={
                 "source_file": "test.pdf",
+                "title": "Test Document",
                 "page_number": 1,
                 "token_count": 2
             }
@@ -179,5 +212,7 @@ def test_metadata_in_get_documents(monkeypatch):
     docs = get_documents()
     assert len(docs) == 1
     assert "source_file" in docs[0]
+    assert "title" in docs[0]
     assert "page_number" in docs[0]
     assert "token_count" in docs[0]
+    assert docs[0]["title"] == "Test Document"

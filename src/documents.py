@@ -19,21 +19,9 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s [%(levelname)s] %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S',
-    force=True,
-    handlers=[
-        logging.StreamHandler()
-    ]
+    force=True
 )
 logger = logging.getLogger(__name__)
-
-# Force stdout to flush immediately
-import sys
-import io
-sys.stdout = io.TextIOWrapper(
-    sys.stdout.buffer,
-    line_buffering=True,
-    write_through=True
-)
 
 @dataclass
 class DocumentChunk:
@@ -166,7 +154,25 @@ class DocumentProcessor:
                 logger.info(f"Converted .doc to .docx: {file_path}")
             
             doc = Document(file_path)
-            current_section = {'text': [], 'metadata': {'section_type': 'body'}}
+            
+            # Extract document title from core properties
+            title = None
+            if hasattr(doc, 'core_properties') and doc.core_properties:
+                title = doc.core_properties.title
+                if title:
+                    title = title.strip()
+            
+            # If no title found, use filename without extension
+            if not title:
+                title = os.path.splitext(os.path.basename(file_path))[0]
+            
+            # Create at least one section even if there's no content
+            # This ensures we preserve the document title
+            current_section = {'text': [], 'metadata': {
+                'section_type': 'body',
+                'title': title,
+                'source_file': os.path.basename(file_path)
+            }}
             
             for paragraph in doc.paragraphs:
                 # Skip empty paragraphs
@@ -190,7 +196,9 @@ class DocumentProcessor:
                             'section_title': paragraph.text,
                             'heading_level': int(paragraph.style.name[-1]) 
                             if paragraph.style.name.startswith('Heading') 
-                            else 0
+                            else 0,
+                            'title': title,
+                            'source_file': os.path.basename(file_path)
                         }
                     }
                 else:
@@ -199,10 +207,16 @@ class DocumentProcessor:
                     if cleaned_text:
                         current_section['text'].append(cleaned_text)
             
-            # Add final section
+            # Add final section or empty section if no content
             if current_section['text']:
                 sections.append({
                     'text': ' '.join(current_section['text']),
+                    'metadata': current_section['metadata']
+                })
+            else:
+                # Add empty section to preserve document metadata
+                sections.append({
+                    'text': '',
                     'metadata': current_section['metadata']
                 })
             
@@ -228,13 +242,44 @@ class DocumentProcessor:
             
             try:
                 reader = PdfReader(file_or_path, strict=False)
-                metadata = {'title': '', 'file_type': 'pdf'}
                 
-                try:
-                    if hasattr(reader, 'metadata') and reader.metadata:
-                        metadata['title'] = reader.metadata.get('/Title', '')
-                except Exception as e:
-                    logger.warning(f"Error extracting PDF metadata: {str(e)}")
+                # Extract document title from metadata
+                title = None
+                if hasattr(reader, 'metadata') and reader.metadata and '/Title' in reader.metadata:
+                    title = reader.metadata['/Title']
+                    if isinstance(title, bytes):
+                        title = title.decode('utf-8', errors='ignore')
+                    title = title.strip()
+                
+                # If no title in metadata, try to get it from the first page text
+                if not title and len(reader.pages) > 0:
+                    first_page_text = reader.pages[0].extract_text()
+                    first_lines = [line.strip() for line in first_page_text.split('\n') if line.strip()][:3]
+                    for line in first_lines:
+                        # Look for a line that appears to be a title:
+                        # - Starts with a capital letter
+                        # - No sentence endings
+                        # - Not too long
+                        # - Not all caps (likely a header)
+                        if (line and len(line) < 100 and 
+                            re.match(r'^[A-Z]', line) and 
+                            not re.search(r'[.!?]$', line) and
+                            not line.isupper()):
+                            title = line
+                            break
+                
+                # If still no title, use filename without extension
+                if not title:
+                    if isinstance(file_or_path, str):
+                        title = os.path.splitext(os.path.basename(file_or_path))[0]
+                    else:
+                        title = "Untitled Document"
+                
+                metadata = {
+                    'title': title,
+                    'file_type': 'pdf',
+                    'source_file': os.path.basename(file_or_path) if isinstance(file_or_path, str) else "uploaded.pdf"
+                }
                 
                 # Process each page
                 for i, page in enumerate(reader.pages):
@@ -257,17 +302,17 @@ class DocumentProcessor:
                             if re.match(r'^(Test PDF Document|Section \d+:)', line):
                                 # Save previous section if it exists
                                 if current_section:
+                                    section_metadata = metadata.copy()  # Start with document-level metadata
+                                    section_metadata.update({  # Add section-specific metadata
+                                        'section_type': 'content',
+                                        'section_title': current_title,
+                                        'page_number': i + 1,
+                                        'page_size': page.mediabox.upper_right if hasattr(page, 'mediabox') else (0, 0),
+                                        'rotation': page.rotation if hasattr(page, 'rotation') else 0
+                                    })
                                     result.append({
                                         'text': current_section,
-                                        'metadata': {
-                                            'section_type': 'content',
-                                            'section_title': current_title,
-                                            'page_number': i + 1,
-                                            'page_size': page.mediabox.upper_right if hasattr(page, 'mediabox') else (0, 0),
-                                            'rotation': page.rotation if hasattr(page, 'rotation') else 0,
-                                            'title': metadata['title'],
-                                            'file_type': metadata['file_type']
-                                        }
+                                        'metadata': section_metadata
                                     })
                                 current_title = line
                                 current_section = ""
@@ -278,22 +323,36 @@ class DocumentProcessor:
                         
                         # Add final section
                         if current_section:
+                            section_metadata = metadata.copy()  # Start with document-level metadata
+                            section_metadata.update({  # Add section-specific metadata
+                                'section_type': 'content',
+                                'section_title': current_title,
+                                'page_number': i + 1,
+                                'page_size': page.mediabox.upper_right if hasattr(page, 'mediabox') else (0, 0),
+                                'rotation': page.rotation if hasattr(page, 'rotation') else 0
+                            })
                             result.append({
                                 'text': current_section,
-                                'metadata': {
-                                    'section_type': 'content',
-                                    'section_title': current_title,
-                                    'page_number': i + 1,
-                                    'page_size': page.mediabox.upper_right if hasattr(page, 'mediabox') else (0, 0),
-                                    'rotation': page.rotation if hasattr(page, 'rotation') else 0,
-                                    'title': metadata['title'],
-                                    'file_type': metadata['file_type']
-                                }
+                                'metadata': section_metadata
                             })
                         
                     except Exception as e:
                         logger.warning(f"Error processing page {i+1}: {str(e)}")
                         continue
+                
+                # If no sections were created (empty PDF), create one with empty text
+                if not result:
+                    result.append({
+                        'text': '',
+                        'metadata': {
+                            **metadata,
+                            'section_type': 'content',
+                            'section_title': '',
+                            'page_number': 1,
+                            'page_size': (0, 0),
+                            'rotation': 0
+                        }
+                    })
                 
                 return result
                 
@@ -308,7 +367,7 @@ class DocumentProcessor:
             file_name = os.path.basename(file_or_path)
         else:
             file_ext = '.pdf'
-            file_name = 'test.pdf'
+            file_name = 'uploaded.pdf'
         
         logger.info(f"\n{'='*80}\nProcessing document: {file_name}\n{'='*80}")
         
@@ -326,6 +385,31 @@ class DocumentProcessor:
         
         logger.info(f"\nFound {len(sections)} sections to process")
         
+        # Handle empty documents
+        if not sections:
+            # Create a single empty chunk with basic metadata
+            chunks.append(DocumentChunk(
+                id=1,
+                text="",
+                metadata={
+                    'source_file': file_name,
+                    'file_type': file_ext[1:],
+                    'title': os.path.splitext(file_name)[0],
+                    'section_type': 'content',
+                    'section_title': '',
+                    'chunk_size': 0,
+                    'token_count': 0,
+                    'chunk_index': 0,
+                    'total_chunks': 1
+                }
+            ))
+            return chunks
+        
+        # Calculate total chunks for non-empty documents
+        total_chunks = sum(1 if not section['text'] else len(self.text_splitter.split_text(section['text'])) 
+                         for section in sections)
+        current_chunk = 0
+        
         for section_idx, section in enumerate(sections, 1):
             text = section['text']
             base_metadata = {
@@ -338,9 +422,25 @@ class DocumentProcessor:
             logger.info(f"Section Title: {base_metadata.get('section_title', 'Untitled')}")
             logger.info(f"Section Type: {base_metadata.get('section_type', 'Unknown')}")
             
-            # Split text into chunks
-            text_chunks = self.text_splitter.split_text(text) if text else []
+            if not text:
+                # Create a single empty chunk for empty sections
+                chunks.append(DocumentChunk(
+                    id=chunk_id,
+                    text="",
+                    metadata={
+                        **base_metadata,
+                        'chunk_size': 0,
+                        'token_count': 0,
+                        'chunk_index': current_chunk,
+                        'total_chunks': total_chunks
+                    }
+                ))
+                chunk_id += 1
+                current_chunk += 1
+                continue
             
+            # Split text into chunks
+            text_chunks = self.text_splitter.split_text(text)
             logger.info(f"Generated {len(text_chunks)} chunks from section")
             
             # Create chunk objects
@@ -356,7 +456,9 @@ class DocumentProcessor:
                         metadata={
                             **base_metadata,
                             'chunk_size': len(chunk_text),
-                            'token_count': len(self.tokenizer.encode(chunk_text))
+                            'token_count': len(self.tokenizer.encode(chunk_text)),
+                            'chunk_index': current_chunk,
+                            'total_chunks': total_chunks
                         }
                     )
                     chunks.append(chunk)
@@ -374,13 +476,19 @@ class DocumentProcessor:
                     logger.info("=" * 40)
                     
                     chunk_id += 1
+                    current_chunk += 1
         
         logger.info(f"\n{'='*80}")
         logger.info(f"Document processing complete")
         logger.info(f"Total sections processed: {len(sections)}")
         logger.info(f"Total chunks created: {len(chunks)}")
-        logger.info(f"Average chunk size: {sum(len(c.text) for c in chunks)/len(chunks):.2f} characters")
-        logger.info(f"Average tokens per chunk: {sum(len(self.tokenizer.encode(c.text)) for c in chunks)/len(chunks):.2f}")
+        
+        if chunks:
+            logger.info(f"Average chunk size: {sum(len(c.text) for c in chunks)/len(chunks):.2f} characters")
+            logger.info(f"Average tokens per chunk: {sum(len(self.tokenizer.encode(c.text)) for c in chunks)/len(chunks):.2f}")
+        else:
+            logger.info("No chunks created (empty document)")
+            
         logger.info(f"{'='*80}\n")
         
         return chunks

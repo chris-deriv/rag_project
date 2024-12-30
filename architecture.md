@@ -4,119 +4,43 @@ This document details the architectural design and implementation of the RAG (Re
 
 ## Document Processing Architecture
 
-### Text Extraction
+### Document Title Extraction
 
-The system employs different strategies for extracting text based on document type:
+The system implements a robust title extraction strategy for different document types:
 
-1. **PDF Text Extraction**
+1. **PDF Documents**
 ```python
 def _extract_pdf_text(self, file_or_path: Union[str, BinaryIO]) -> List[Dict[str, str]]:
 ```
-- Uses PyPDF (PdfReader) for extraction
-- Processes documents page by page
-- Extracts metadata including:
-  - Title
-  - Page numbers
-  - Page size
-  - Rotation
-- Identifies section headers using regex patterns
-- Groups content into logical sections with metadata
+- Primary: Extracts from PDF metadata (/Title)
+- Secondary: Intelligent first page content analysis
+  - Examines first 3 lines
+  - Identifies title-like text based on:
+    - Capitalization
+    - Length constraints
+    - Sentence ending patterns
+    - Case formatting
+- Fallback: Uses filename without extension
 
-2. **Word Document Extraction**
+2. **DOCX Documents**
 ```python
 def _extract_docx_text(self, file_path: str) -> List[Dict[str, str]]:
 ```
-- Uses python-docx for DOCX files
-- Automatically converts DOC to DOCX using LibreOffice
-- Preserves document structure:
-  - Headers/titles based on paragraph styles
-  - Section grouping
-  - Document formatting
-- Maintains metadata about section types and hierarchy
+- Primary: Extracts from core properties
+- Handles empty/missing properties
+- Fallback: Uses filename without extension
 
-3. **DOC to DOCX Conversion**
+3. **Metadata Structure**
 ```python
-def _convert_doc_to_docx(self, file_path: str) -> str:
+{
+    "title": str,          # Extracted document title
+    "source_file": str,    # Original filename
+    "file_type": str,     # Document type (pdf/docx)
+    "section_type": str,   # Content organization
+    "section_title": str,  # Section heading if any
+    ...
+}
 ```
-- Uses LibreOffice in headless mode
-- Command-line conversion process
-- Creates temporary files for processing
-- Handles cleanup after conversion
-
-### Text Chunking Strategy
-
-The system uses a sophisticated approach to break documents into meaningful chunks while preserving context:
-
-1. **Text Splitter Configuration**
-```python
-RecursiveCharacterTextSplitter(
-    separators=[
-        "\n\n",  # Paragraph breaks
-        "\n",    # Line breaks
-        ".",     # Sentence breaks
-        "!",     # Exclamation marks
-        "?",     # Question marks
-        ";",     # Semicolons
-        ":",     # Colons
-        " ",     # Words
-        ""       # Characters
-    ],
-    chunk_size=150,     # Default chunk size
-    chunk_overlap=50,   # Overlap between chunks
-)
-```
-
-2. **Chunking Process Flow**
-- Text cleaning and normalization
-- Hierarchical splitting:
-  1. Try to split at paragraph boundaries
-  2. Fall back to sentence boundaries
-  3. Use punctuation marks as delimiters
-  4. Split by words if necessary
-- Overlap maintenance between chunks
-- Metadata preservation
-
-3. **Text Cleaning Process**
-```python
-def _clean_text(self, text: str) -> str:
-```
-- Fixes text encoding issues (using ftfy)
-- Handles hyphenation at line breaks
-- Normalizes whitespace
-- Fixes punctuation spacing
-- Removes redundant whitespace
-
-4. **Chunk Metadata**
-Each chunk includes:
-- Source file information
-- Section type and title
-- Position in document
-- Size metrics:
-  - Character count
-  - Token count
-- Original document metadata
-
-### Quality Control Measures
-
-1. **Chunk Quality**
-- Empty chunks are filtered out
-- Chunks start with complete words/sentences
-- Leading punctuation is removed
-- Context is preserved through overlap
-
-2. **Logging and Monitoring**
-- Detailed logging of processing steps
-- Chunk statistics:
-  - Total chunks created
-  - Average chunk size
-  - Token distribution
-- Error handling and reporting
-
-3. **Storage and Persistence**
-- Chunks are saved with continuous IDs
-- Document metadata is preserved
-- Efficient retrieval system
-- Disk-based persistence for reliability
 
 ## Vector Database Integration
 
@@ -127,10 +51,38 @@ The system uses ChromaDB for vector storage and retrieval:
 def add_documents(self, documents: List[Dict[str, Any]]) -> None:
 ```
 - Stores document embeddings
-- Maintains metadata
+- Maintains metadata including:
+  - Source document name
+  - Document title
+  - Chunk index and total chunks
+  - Document text
 - Handles batch operations
 
-2. **Metadata Management**
+2. **Document Listing**
+```python
+def list_document_names(self) -> List[Dict[str, Any]]:
+```
+- Groups chunks by source document
+- Calculates chunk statistics:
+  - Number of chunks per document
+  - Total chunks in document
+- Handles missing metadata gracefully
+- Returns document-level overview
+
+3. **Chunk Retrieval**
+```python
+def get_document_chunks(self, source_name: str) -> List[Dict[str, Any]]:
+```
+- Retrieves all chunks for a document
+- Orders chunks by index
+- Includes chunk metadata:
+  - Chunk text
+  - Document title
+  - Position in document
+  - Total chunks
+- Handles missing documents
+
+4. **Metadata Management**
 ```python
 def get_metadata(self) -> Dict[str, Any]:
 ```
@@ -138,13 +90,51 @@ def get_metadata(self) -> Dict[str, Any]:
 - Document counts
 - Collection metadata
 
-3. **Document Retrieval**
+5. **Document Retrieval**
 ```python
 def get_all_documents(self) -> Dict[str, Any]:
 ```
 - Returns all documents
-- Includes embeddings
-- Preserves metadata
+- Includes embeddings and metadata
+- Supports selective field inclusion
+
+### Document Organization
+
+1. **Chunk Metadata Structure**
+```python
+{
+    "text": str,           # Chunk content
+    "title": str,          # Document title
+    "source_name": str,    # Original document name
+    "chunk_index": int,    # Position in document
+    "total_chunks": int,   # Total chunks in document
+    "section_type": str,   # Content organization
+    "section_title": str   # Section heading if any
+}
+```
+
+2. **Document Statistics**
+```python
+{
+    "source_name": str,    # Document identifier
+    "title": str,         # Document title
+    "chunk_count": int,    # Actual chunks stored
+    "total_chunks": int    # Expected total chunks
+}
+```
+
+3. **Error Handling**
+- Missing metadata defaults:
+  - Unknown source name
+  - Empty title uses filename
+  - Zero chunk index
+  - Single chunk total
+- Document not found returns empty list
+- Invalid metadata handled gracefully
+
+## Search and Retrieval Architecture
+
+[Previous Search and Retrieval Architecture section remains unchanged...]
 
 ## API Endpoints
 
@@ -153,6 +143,31 @@ The system exposes several REST endpoints:
 1. **Document Management**
 - `POST /upload` - Upload and process new documents
 - `GET /documents` - Retrieve processed documents
+- `GET /document-names` - List unique documents with statistics
+  ```python
+  # Response format:
+  [
+      {
+          "source_name": str,     # Document name
+          "title": str,           # Document title
+          "chunk_count": int,     # Number of chunks
+          "total_chunks": int     # Total expected chunks
+      }
+  ]
+  ```
+- `GET /document-chunks/<source_name>` - Get ordered chunks for a document
+  ```python
+  # Response format:
+  [
+      {
+          "id": str,             # Chunk identifier
+          "text": str,           # Chunk content
+          "title": str,          # Document title
+          "chunk_index": int,    # Position in document
+          "total_chunks": int    # Total chunks in document
+      }
+  ]
+  ```
 - `GET /metadata` - Get collection metadata
 - `GET /vector-documents` - Get documents with embeddings
 
@@ -168,5 +183,8 @@ Key libraries and tools:
 - LibreOffice - DOC to DOCX conversion
 - langchain - Text splitting
 - tiktoken - Token counting
-- ChromaDB - Vector storage
+- sentence-transformers - Text embedding generation
+- numpy - Numerical operations
+- openai - GPT model integration
+- chromadb - Vector storage
 - Flask - Web API
