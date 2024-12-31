@@ -3,12 +3,41 @@ from chromadb.config import Settings
 from config.settings import CHROMA_COLLECTION_NAME, CHROMA_PERSIST_DIR
 from typing import List, Dict, Any, Optional
 import numpy as np
+import logging
+import os
+
+logger = logging.getLogger(__name__)
 
 class VectorDatabase:
     def __init__(self):
         """Initialize the vector database with persistence."""
-        self.client = chromadb.Client(Settings(persist_directory=CHROMA_PERSIST_DIR))
-        self.collection = self.client.get_or_create_collection(name=CHROMA_COLLECTION_NAME)
+        try:
+            logger.info(f"Initializing ChromaDB with persist_directory: {CHROMA_PERSIST_DIR}")
+            
+            # Ensure persist directory exists
+            os.makedirs(CHROMA_PERSIST_DIR, exist_ok=True)
+            
+            settings = Settings(
+                persist_directory=CHROMA_PERSIST_DIR,
+                anonymized_telemetry=False,
+                is_persistent=True,
+                allow_reset=True
+            )
+            
+            self.client = chromadb.PersistentClient(path=CHROMA_PERSIST_DIR, settings=settings)
+            
+            # Get or create collection with specific distance function
+            self.collection = self.client.get_or_create_collection(
+                name=CHROMA_COLLECTION_NAME,
+                metadata={"hnsw:space": "cosine"}  # Use cosine similarity
+            )
+            
+            logger.info("ChromaDB initialized successfully")
+            logger.info(f"Collection count: {self.collection.count()}")
+            
+        except Exception as e:
+            logger.error(f"Error initializing ChromaDB: {str(e)}")
+            raise
 
     def add_documents(self, documents: List[Dict[str, Any]]) -> None:
         """
@@ -29,16 +58,18 @@ class VectorDatabase:
                 - section_type: Type of section (e.g., 'body', 'heading')
         """
         try:
+            if not documents:
+                logger.warning("No documents to add")
+                return
+                
             # Print debug information
-            print("\nAdding documents to ChromaDB:")
+            logger.info("\nAdding documents to ChromaDB:")
             for doc in documents:
-                print(f"\nDocument ID: {doc['id']}")
-                print(f"Source Name: {doc.get('source_name', 'Unknown')}")
-                print(f"Title: {doc.get('title', '')}")
-                print(f"Chunk Index: {doc.get('chunk_index', 0)}")
-                print(f"Total Chunks: {doc.get('total_chunks', 1)}")
-                print(f"Section Title: {doc.get('section_title', '')}")
-                print(f"Section Type: {doc.get('section_type', 'content')}")
+                logger.info(f"\nDocument ID: {doc['id']}")
+                logger.info(f"Source Name: {doc.get('source_name', 'Unknown')}")
+                logger.info(f"Title: {doc.get('title', '')}")
+                logger.info(f"Chunk Index: {doc.get('chunk_index', 0)}")
+                logger.info(f"Total Chunks: {doc.get('total_chunks', 1)}")
             
             self.collection.add(
                 embeddings=[doc['embedding'].tolist() for doc in documents],
@@ -54,8 +85,10 @@ class VectorDatabase:
                 } for doc in documents],
                 ids=[str(doc["id"]) for doc in documents]
             )
+            logger.info(f"Successfully added {len(documents)} documents")
         except Exception as e:
-            raise Exception(f"Error adding documents to vector database: {str(e)}")
+            logger.error(f"Error adding documents to vector database: {str(e)}")
+            raise
 
     def query(self, 
              query_embedding: np.ndarray, 
@@ -102,7 +135,8 @@ class VectorDatabase:
                 )
             return results
         except Exception as e:
-            raise Exception(f"Error querying vector database: {str(e)}")
+            logger.error(f"Error querying vector database: {str(e)}")
+            raise
 
     def search_titles(self, title_query: str) -> List[Dict[str, Any]]:
         """
@@ -148,7 +182,8 @@ class VectorDatabase:
             
             return matches
         except Exception as e:
-            raise Exception(f"Error searching titles: {str(e)}")
+            logger.error(f"Error searching titles: {str(e)}")
+            raise
 
     def get_metadata(self) -> Dict[str, Any]:
         """
@@ -169,19 +204,43 @@ class VectorDatabase:
             }
             return metadata
         except Exception as e:
-            raise Exception(f"Error getting collection metadata: {str(e)}")
+            logger.error(f"Error getting collection metadata: {str(e)}")
+            raise
 
-    def get_all_documents(self) -> Dict[str, Any]:
+    def get_all_documents(self) -> List[Dict[str, Any]]:
         """
         Get all documents and their metadata from the collection.
         
         Returns:
-            Dict containing all documents with their ids, embeddings, and metadata
+            List of documents with their ids, embeddings, and metadata
         """
         try:
-            return self.collection.get(include=['embeddings', 'metadatas', 'documents'])
+            # Check if collection is empty
+            count = self.collection.count()
+            if count == 0:
+                logger.info("ChromaDB collection is empty")
+                return []
+                
+            logger.info(f"Getting {count} documents from ChromaDB")
+            result = self.collection.get(include=['embeddings', 'metadatas', 'documents'])
+            
+            # Convert ChromaDB result into a list of documents
+            documents = []
+            for i in range(len(result['ids'])):
+                doc = {
+                    'id': result['ids'][i],
+                    'text': result['documents'][i],
+                    'embedding': result['embeddings'][i],
+                    **result['metadatas'][i]  # Include all metadata fields
+                }
+                documents.append(doc)
+            
+            logger.info(f"Successfully retrieved {len(documents)} documents")
+            return documents
+            
         except Exception as e:
-            raise Exception(f"Error getting all documents: {str(e)}")
+            logger.error(f"Error getting all documents: {str(e)}")
+            raise
 
     def list_document_names(self) -> List[Dict[str, Any]]:
         """
@@ -195,12 +254,16 @@ class VectorDatabase:
             - total_chunks: Total expected chunks
         """
         try:
+            # Check if collection is empty
+            count = self.collection.count()
+            if count == 0:
+                logger.info("ChromaDB collection is empty")
+                return []
+                
             # Print debug information
-            print("\nListing documents from ChromaDB:")
+            logger.info("\nListing documents from ChromaDB:")
             all_docs = self.collection.get(include=['metadatas'])
-            print(f"Total documents found: {len(all_docs['metadatas'])}")
-            for metadata in all_docs['metadatas']:
-                print(f"\nMetadata: {metadata}")
+            logger.info(f"Total documents found: {len(all_docs['metadatas'])}")
             
             doc_stats = {}
             
@@ -219,7 +282,8 @@ class VectorDatabase:
             
             return list(doc_stats.values())
         except Exception as e:
-            raise Exception(f"Error listing document names: {str(e)}")
+            logger.error(f"Error listing document names: {str(e)}")
+            raise
 
     def get_document_chunks(self, source_name: str) -> List[Dict[str, Any]]:
         """
@@ -239,6 +303,11 @@ class VectorDatabase:
             - section_type: Type of section (e.g., 'body', 'heading')
         """
         try:
+            # Check if collection is empty
+            if self.collection.count() == 0:
+                logger.info("ChromaDB collection is empty")
+                return []
+                
             # Get all chunks for the document
             all_docs = self.collection.get(include=['metadatas', 'documents'])
             doc_chunks = []
@@ -260,12 +329,31 @@ class VectorDatabase:
             doc_chunks.sort(key=lambda x: x['chunk_index'])
             return doc_chunks
         except Exception as e:
-            raise Exception(f"Error getting document chunks: {str(e)}")
+            logger.error(f"Error getting document chunks: {str(e)}")
+            raise
 
     def delete_collection(self) -> None:
         """Delete the current collection from the database."""
         try:
+            logger.info(f"Deleting collection: {CHROMA_COLLECTION_NAME}")
+            # Delete the collection
             self.client.delete_collection(CHROMA_COLLECTION_NAME)
-            self.collection = self.client.get_or_create_collection(name=CHROMA_COLLECTION_NAME)
+            
+            # Reset the client to ensure clean state
+            settings = Settings(
+                persist_directory=CHROMA_PERSIST_DIR,
+                anonymized_telemetry=False,
+                is_persistent=True,
+                allow_reset=True
+            )
+            self.client = chromadb.PersistentClient(path=CHROMA_PERSIST_DIR, settings=settings)
+            
+            # Create a new collection
+            self.collection = self.client.create_collection(
+                name=CHROMA_COLLECTION_NAME,
+                metadata={"hnsw:space": "cosine"}
+            )
+            logger.info("Collection deleted and recreated successfully")
         except Exception as e:
-            raise Exception(f"Error deleting collection: {str(e)}")
+            logger.error(f"Error deleting collection: {str(e)}")
+            raise

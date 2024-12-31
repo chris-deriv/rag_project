@@ -2,28 +2,51 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    libreoffice \
-    libreoffice-writer \
+# Install system dependencies in a single layer
+RUN apt-get update && \
+    apt-get install -y \
+    gcc \
+    python3-dev \
+    libreoffice-writer-nogui \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first to leverage Docker cache
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Create non-root user
+# Create non-root user first
 RUN useradd -m -u 1000 appuser
 
-# Create necessary directories and set permissions
+# Create and set permissions for all directories
 RUN mkdir -p \
     /app/chroma_db \
     /app/model_cache \
     /app/cache/huggingface \
     /app/cache/tiktoken \
     /app/cache/torch \
-    && chown -R appuser:appuser /app
+    /app/uploads \
+    /app/tmp \
+    /home/appuser/.config/libreoffice/4/user \
+    && chown -R appuser:appuser /app \
+    && chown -R appuser:appuser /home/appuser/.config \
+    && chmod -R 755 /home/appuser/.config \
+    && chmod -R 777 /app/tmp \
+    && chmod -R 755 /app
+
+# Copy and set up entrypoint script with root permissions
+COPY docker-entrypoint.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+# Switch to non-root user before pip install
+USER appuser
+
+# Add local bin to PATH for pip --user installs
+ENV PATH="/home/appuser/.local/bin:${PATH}"
+
+# Set LibreOffice user profile directory and temp directory
+ENV HOME=/home/appuser \
+    USER_INSTALLATION='file:///home/appuser/.config/libreoffice/4/user' \
+    TMPDIR=/app/tmp
+
+# Copy requirements first to leverage Docker cache
+COPY --chown=appuser:appuser requirements.txt .
+RUN pip install --user --no-cache-dir -r requirements.txt
 
 # Set cache environment variables
 ENV TRANSFORMERS_CACHE=/app/cache/huggingface \
@@ -32,17 +55,7 @@ ENV TRANSFORMERS_CACHE=/app/cache/huggingface \
     SENTENCE_TRANSFORMERS_HOME=/app/model_cache
 
 # Copy application code
-COPY . .
-
-# Copy and set up entrypoint script
-COPY docker-entrypoint.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh
-
-# Set ownership of all files
-RUN chown -R appuser:appuser /app
-
-# Switch to non-root user
-USER appuser
+COPY --chown=appuser:appuser . .
 
 EXPOSE 5000
 

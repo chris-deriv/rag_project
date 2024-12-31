@@ -1,8 +1,7 @@
 """Document processing for the RAG application with advanced chunking strategies."""
 import os
-import json
 from typing import List, Dict, Optional, BinaryIO, Union
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 import re
 from pypdf import PdfReader
 from docx import Document
@@ -12,7 +11,8 @@ import logging
 import warnings
 import subprocess
 import tempfile
-from config.settings import CHROMA_PERSIST_DIR
+from .database import VectorDatabase
+from .embedding import EmbeddingGenerator
 
 # Configure logging with immediate output
 logging.basicConfig(
@@ -29,21 +29,6 @@ class DocumentChunk:
     id: int
     text: str
     metadata: Dict
-
-    def to_dict(self):
-        return {
-            "id": self.id,
-            "text": self.text,
-            "metadata": self.metadata
-        }
-
-    @classmethod
-    def from_dict(cls, data):
-        return cls(
-            id=data["id"],
-            text=data["text"],
-            metadata=data["metadata"]
-        )
 
 class DocumentProcessor:
     """Handles document processing with advanced chunking strategies."""
@@ -108,36 +93,60 @@ class DocumentProcessor:
     def _convert_doc_to_docx(self, file_path: str) -> str:
         """Convert a .doc file to .docx format using LibreOffice."""
         try:
-            # Create temp directory for output
-            with tempfile.TemporaryDirectory() as temp_dir:
-                output_path = os.path.join(temp_dir, 'output.docx')
-                
-                # Use LibreOffice to convert
-                cmd = [
-                    'soffice',
-                    '--headless',
-                    '--convert-to',
-                    'docx',
-                    '--outdir',
-                    temp_dir,
-                    file_path
-                ]
-                
-                process = subprocess.run(
-                    cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True
-                )
-                
-                if process.returncode != 0:
-                    raise ValueError(f"LibreOffice conversion failed: {process.stderr}")
-                
-                # Copy the converted file to a new location
-                with tempfile.NamedTemporaryFile(suffix='.docx', delete=False) as temp_file:
-                    with open(output_path, 'rb') as f:
-                        temp_file.write(f.read())
-                    return temp_file.name
+            # Use the custom tmp directory from Docker environment
+            tmp_dir = os.environ.get('TMPDIR', '/app/tmp')
+            if not os.path.exists(tmp_dir):
+                os.makedirs(tmp_dir, exist_ok=True)
+                os.chmod(tmp_dir, 0o777)
+            
+            # Get the base filename without extension
+            base_name = os.path.splitext(os.path.basename(file_path))[0]
+            expected_output = os.path.join(tmp_dir, f"{base_name}.docx")
+            
+            # Use LibreOffice to convert with explicit temp dir
+            cmd = [
+                'soffice',
+                '-env:UserInstallation=file:///home/appuser/.config/libreoffice/4/user',
+                f'-env:TMPDIR={tmp_dir}',
+                '--headless',
+                '--convert-to',
+                'docx',
+                '--outdir',
+                tmp_dir,
+                file_path
+            ]
+            
+            logger.info(f"Running LibreOffice conversion command: {' '.join(cmd)}")
+            logger.info(f"Temp directory: {tmp_dir}")
+            logger.info(f"Expected output: {expected_output}")
+            
+            process = subprocess.run(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                env={
+                    'HOME': '/home/appuser',
+                    'TMPDIR': tmp_dir,
+                    'PATH': os.environ.get('PATH', '')
+                }
+            )
+            
+            if process.returncode != 0:
+                logger.error(f"LibreOffice conversion failed with return code {process.returncode}")
+                logger.error(f"stdout: {process.stdout}")
+                logger.error(f"stderr: {process.stderr}")
+                raise ValueError(f"LibreOffice conversion failed: {process.stderr}")
+            
+            # List directory contents for debugging
+            logger.info(f"Directory contents after conversion: {os.listdir(tmp_dir)}")
+            
+            if not os.path.exists(expected_output):
+                logger.error(f"Expected output file not found: {expected_output}")
+                logger.error(f"Directory contents: {os.listdir(tmp_dir)}")
+                raise FileNotFoundError(f"Converted file not found at {expected_output}")
+            
+            return expected_output
             
         except Exception as e:
             logger.error(f"Error converting .doc to .docx: {str(e)}")
@@ -146,11 +155,13 @@ class DocumentProcessor:
     def _extract_docx_text(self, file_path: str) -> List[Dict[str, str]]:
         """Extract text from DOCX/DOC with metadata and structure."""
         sections = []
+        converted_file = None
         
         try:
             # If it's a .doc file, convert to .docx first
             if file_path.lower().endswith('.doc'):
-                file_path = self._convert_doc_to_docx(file_path)
+                converted_file = self._convert_doc_to_docx(file_path)
+                file_path = converted_file
                 logger.info(f"Converted .doc to .docx: {file_path}")
             
             doc = Document(file_path)
@@ -171,7 +182,7 @@ class DocumentProcessor:
             current_section = {'text': [], 'metadata': {
                 'section_type': 'body',
                 'title': title,
-                'source_file': os.path.basename(file_path)
+                'source_name': os.path.basename(file_path)
             }}
             
             for paragraph in doc.paragraphs:
@@ -198,7 +209,7 @@ class DocumentProcessor:
                             if paragraph.style.name.startswith('Heading') 
                             else 0,
                             'title': title,
-                            'source_file': os.path.basename(file_path)
+                            'source_name': os.path.basename(file_path)
                         }
                     }
                 else:
@@ -227,9 +238,9 @@ class DocumentProcessor:
             raise ValueError(f"Error processing Word document: {str(e)}")
         finally:
             # Clean up temporary file if it was created
-            if file_path.lower().endswith('.doc'):
+            if converted_file:
                 try:
-                    os.remove(file_path)
+                    os.remove(converted_file)
                 except:
                     pass
     
@@ -278,7 +289,7 @@ class DocumentProcessor:
                 metadata = {
                     'title': title,
                     'file_type': 'pdf',
-                    'source_file': os.path.basename(file_or_path) if isinstance(file_or_path, str) else "uploaded.pdf"
+                    'source_name': os.path.basename(file_or_path) if isinstance(file_or_path, str) else "uploaded.pdf"
                 }
                 
                 # Process each page
@@ -407,7 +418,7 @@ class DocumentProcessor:
                 id=1,
                 text="",
                 metadata={
-                    'source_file': file_name,
+                    'source_name': file_name,
                     'file_type': file_ext[1:],
                     'title': os.path.splitext(file_name)[0],
                     'section_type': 'content',
@@ -428,7 +439,7 @@ class DocumentProcessor:
         for section_idx, section in enumerate(sections, 1):
             text = section['text']
             base_metadata = {
-                'source_file': file_name,
+                'source_name': file_name,
                 'file_type': file_ext[1:],
                 **section['metadata']
             }
@@ -487,7 +498,7 @@ class DocumentProcessor:
                     logger.info(f"Character Count: {len(chunk_text)}")
                     logger.info(f"Token Count: {len(self.tokenizer.encode(chunk_text))}")
                     logger.info("Metadata:")
-                    logger.info(json.dumps(chunk.metadata, indent=2))
+                    logger.info(str(chunk.metadata))
                     logger.info("=" * 40)
                     
                     chunk_id += 1
@@ -513,56 +524,43 @@ class DocumentStore:
     """Manages document storage and retrieval."""
     
     def __init__(self):
-        self.documents: List[DocumentChunk] = []
         self.processor = DocumentProcessor()
-        self.storage_path = os.path.join(CHROMA_PERSIST_DIR, "documents.json")
-        self._load_documents()
-    
-    def _load_documents(self) -> None:
-        """Load documents from disk."""
-        if os.path.exists(self.storage_path):
-            try:
-                with open(self.storage_path, 'r') as f:
-                    data = json.load(f)
-                    self.documents = [DocumentChunk.from_dict(doc) for doc in data]
-                logger.info(f"Loaded {len(self.documents)} documents from storage")
-            except Exception as e:
-                logger.error(f"Error loading documents: {str(e)}")
-                self.documents = []
-
-    def _save_documents(self) -> None:
-        """Save documents to disk."""
-        try:
-            os.makedirs(os.path.dirname(self.storage_path), exist_ok=True)
-            with open(self.storage_path, 'w') as f:
-                json.dump([doc.to_dict() for doc in self.documents], f)
-            logger.info(f"Saved {len(self.documents)} documents to storage")
-        except Exception as e:
-            logger.error(f"Error saving documents: {str(e)}")
+        self.db = VectorDatabase()
+        self.embedding_generator = EmbeddingGenerator()
     
     def add_document(self, file_path: str) -> None:
         """Process and add a document to the store."""
-        new_chunks = self.processor.process_document(file_path)
-        
-        # Update IDs to be continuous with existing documents
-        if self.documents:
-            max_id = max(chunk.id for chunk in self.documents)
-            for chunk in new_chunks:
-                chunk.id += max_id
-        
-        self.documents.extend(new_chunks)
-        self._save_documents()
+        try:
+            # Process the document into chunks
+            chunks = self.processor.process_document(file_path)
+            
+            # Extract texts for embedding generation
+            texts = [chunk.text for chunk in chunks]
+            
+            # Generate embeddings for all texts
+            embeddings = self.embedding_generator.generate_embeddings(texts)
+            
+            # Convert chunks to the format expected by VectorDatabase
+            documents = []
+            for i, chunk in enumerate(chunks):
+                documents.append({
+                    "id": chunk.id,
+                    "text": chunk.text,
+                    "embedding": embeddings[i],
+                    **chunk.metadata
+                })
+            
+            # Add documents with embeddings to ChromaDB
+            self.db.add_documents(documents)
+            
+        except Exception as e:
+            logger.error(f"Error adding document: {str(e)}")
+            raise
     
     def get_documents(self) -> List[Dict[str, str]]:
-        """Return all document chunks in the expected format."""
-        return [
-            {
-                "id": chunk.id,
-                "text": chunk.text,
-                **chunk.metadata
-            }
-            for chunk in self.documents
-        ]
+        """Return all document chunks."""
+        # Get documents directly from ChromaDB
+        return self.db.get_all_documents()
 
 # Initialize global document store
 document_store = DocumentStore()

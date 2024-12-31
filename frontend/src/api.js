@@ -15,6 +15,12 @@ const api = {
     return response.data;
   },
 
+  // Get upload status
+  getUploadStatus: async (filename) => {
+    const response = await axios.get(`${API_BASE_URL}/upload-status/${filename}`);
+    return response.data;
+  },
+
   // Search document titles
   searchTitles: async (query) => {
     const response = await axios.get(`${API_BASE_URL}/search-titles`, {
@@ -39,9 +45,15 @@ const api = {
   chat: async (query, source_names = [], title = null) => {
     const response = await axios.post(`${API_BASE_URL}/chat`, {
       query,
-      source_names, // Now expects an array of source names
+      source_names,
       title
     });
+    return response.data;
+  },
+
+  // Reset database
+  resetDatabase: async () => {
+    const response = await axios.delete(`${API_BASE_URL}/reset`);
     return response.data;
   }
 };

@@ -4,45 +4,100 @@ import {
   List,
   ListItem,
   ListItemText,
-  Paper,
   Typography,
   Box,
   CircularProgress,
   Checkbox,
-  ListItemIcon
+  ListItemIcon,
+  Alert
 } from '@mui/material';
 import api from '../api';
 
-const DocumentSearch = ({ onDocumentsSelect, selectedDocuments }) => {
+const DocumentSearch = ({ onDocumentsSelect, selectedDocuments, onRefresh, refreshTrigger = 0 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [documents, setDocuments] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [isProcessing, setIsProcessing] = useState(false);
 
-  // Load all documents initially
+  // Initial document load and processing check
+  const loadDocuments = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const docs = await api.getDocumentNames();
+      
+      // Check if any documents are still processing
+      const hasProcessingDocs = docs.some(doc => !doc.chunk_count || doc.chunk_count === 0);
+      setIsProcessing(hasProcessingDocs);
+      
+      setDocuments(docs);
+    } catch (err) {
+      setError('Error loading documents');
+      console.error('Error loading documents:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Load documents initially and when refreshTrigger changes
   useEffect(() => {
-    const loadDocuments = async () => {
+    if (!searchQuery) { // Only reload if not currently searching
+      loadDocuments();
+    }
+  }, [refreshTrigger]); // Reload when refreshTrigger changes
+
+  // Set up polling only when documents are processing
+  useEffect(() => {
+    let pollTimeout;
+    let pollCount = 0;
+    const MAX_POLLS = 30; // 60 seconds total
+
+    const pollDocuments = async () => {
+      if (pollCount >= MAX_POLLS) {
+        setIsProcessing(false);
+        return;
+      }
+
       try {
-        setLoading(true);
         const docs = await api.getDocumentNames();
+        const hasProcessingDocs = docs.some(doc => !doc.chunk_count || doc.chunk_count === 0);
+        
         setDocuments(docs);
+        if (onRefresh) {
+          onRefresh(docs);
+        }
+
+        if (hasProcessingDocs && pollCount < MAX_POLLS) {
+          pollCount++;
+          pollTimeout = setTimeout(pollDocuments, 2000);
+        } else {
+          setIsProcessing(false);
+        }
       } catch (err) {
-        setError('Error loading documents');
-      } finally {
-        setLoading(false);
+        console.error('Error polling documents:', err);
+        setIsProcessing(false);
       }
     };
 
-    loadDocuments();
-  }, []);
+    if (isProcessing) {
+      pollTimeout = setTimeout(pollDocuments, 2000);
+    }
 
-  // Search documents when query changes
+    return () => {
+      if (pollTimeout) {
+        clearTimeout(pollTimeout);
+      }
+    };
+  }, [isProcessing, onRefresh]);
+
+  // Handle search
   useEffect(() => {
-    const searchDocuments = async () => {
+    let searchTimeout;
+
+    const performSearch = async () => {
       if (!searchQuery.trim()) {
-        const docs = await api.getDocumentNames();
-        setDocuments(docs);
-        return;
+        return; // Don't fetch if search is empty
       }
 
       try {
@@ -51,17 +106,36 @@ const DocumentSearch = ({ onDocumentsSelect, selectedDocuments }) => {
         setDocuments(results);
       } catch (err) {
         setError('Error searching documents');
+        console.error('Error searching documents:', err);
       } finally {
         setLoading(false);
       }
     };
 
-    const debounce = setTimeout(searchDocuments, 300);
-    return () => clearTimeout(debounce);
+    if (searchQuery) {
+      searchTimeout = setTimeout(performSearch, 300);
+    }
+
+    return () => {
+      if (searchTimeout) {
+        clearTimeout(searchTimeout);
+      }
+    };
   }, [searchQuery]);
+
+  // Handle search input change
+  const handleSearchChange = (e) => {
+    const value = e.target.value;
+    setSearchQuery(value);
+    if (!value.trim()) {
+      loadDocuments(); // Reload documents when search is cleared
+    }
+  };
 
   // Handle document selection
   const handleDocumentToggle = (doc) => {
+    if (!doc.chunk_count) return; // Prevent selecting documents that are still processing
+    
     const currentIndex = selectedDocuments.findIndex(
       (d) => d.source_name === doc.source_name
     );
@@ -92,7 +166,7 @@ const DocumentSearch = ({ onDocumentsSelect, selectedDocuments }) => {
         label="Search document titles"
         variant="outlined"
         value={searchQuery}
-        onChange={(e) => setSearchQuery(e.target.value)}
+        onChange={handleSearchChange}
         sx={{ mb: 2 }}
       />
 
@@ -103,37 +177,53 @@ const DocumentSearch = ({ onDocumentsSelect, selectedDocuments }) => {
       )}
 
       {error && (
-        <Typography color="error" sx={{ mb: 2 }}>
+        <Alert severity="error" sx={{ mb: 2 }}>
           {error}
-        </Typography>
+        </Alert>
       )}
 
       <List sx={{ maxHeight: 'calc(100vh - 400px)', overflow: 'auto' }}>
-        {documents.map((doc, index) => (
-          <ListItem
-            key={index}
-            dense
-            button
-            onClick={() => handleDocumentToggle(doc)}
-          >
-            <ListItemIcon>
-              <Checkbox
-                edge="start"
-                checked={isSelected(doc)}
-                tabIndex={-1}
-                disableRipple
+        {documents.map((doc, index) => {
+          const isProcessing = !doc.chunk_count || doc.chunk_count === 0;
+          return (
+            <ListItem
+              key={index}
+              dense
+              button
+              onClick={() => !isProcessing && handleDocumentToggle(doc)}
+              sx={{
+                opacity: isProcessing ? 0.7 : 1,
+                cursor: isProcessing ? 'default' : 'pointer',
+                '&:hover': {
+                  backgroundColor: isProcessing ? 'inherit' : undefined
+                }
+              }}
+            >
+              <ListItemIcon>
+                <Checkbox
+                  edge="start"
+                  checked={isSelected(doc)}
+                  tabIndex={-1}
+                  disableRipple
+                  disabled={isProcessing}
+                />
+              </ListItemIcon>
+              <ListItemText
+                primary={doc.title || doc.source_name}
+                secondary={
+                  isProcessing ? (
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <CircularProgress size={16} />
+                      <span>Processing document...</span>
+                    </Box>
+                  ) : (
+                    `${doc.chunk_count} chunks`
+                  )
+                }
               />
-            </ListItemIcon>
-            <ListItemText
-              primary={doc.title || doc.source_name}
-              secondary={
-                doc.chunk_count
-                  ? `${doc.chunk_count} chunks`
-                  : 'Processing...'
-              }
-            />
-          </ListItem>
-        ))}
+            </ListItem>
+          );
+        })}
       </List>
 
       {documents.length === 0 && !loading && (

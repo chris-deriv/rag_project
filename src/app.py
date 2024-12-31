@@ -3,11 +3,11 @@ import logging
 from .embedding import EmbeddingGenerator
 from .database import VectorDatabase
 from .chatbot import Chatbot
-from .documents import get_documents
+from .documents import get_documents, document_store
 
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format='%(asctime)s [%(levelname)s] %(message)s'
 )
 logger = logging.getLogger(__name__)
 
@@ -16,7 +16,7 @@ class RAGApplication:
         """Initialize the RAG application components."""
         logger.info("Initializing RAG application...")
         self.embedder = EmbeddingGenerator()
-        self.vector_db = VectorDatabase()
+        self.vector_db = document_store.db  # Use the same instance from DocumentStore
         self.chatbot = Chatbot()
 
     def index_documents(self, documents: List[Dict[str, Any]]) -> None:
@@ -27,14 +27,27 @@ class RAGApplication:
             documents: List of dictionaries containing document information
         """
         try:
+            if not documents:
+                logger.info("No documents to index")
+                return
+                
             logger.info(f"Indexing {len(documents)} documents...")
             
             # Generate embeddings for all documents
             processed_docs = []
             for doc in documents:
+                # Skip if document is empty or invalid
+                if not isinstance(doc, dict):
+                    logger.warning(f"Skipping invalid document: {doc}")
+                    continue
+                    
+                if 'text' not in doc:
+                    logger.warning(f"Skipping document without text: {doc}")
+                    continue
+                
                 # Extract metadata
                 metadata = {k: v for k, v in doc.items() if k not in ['id', 'text', 'embedding']}
-                source_name = metadata.get('source_file', 'Unknown')
+                source_name = metadata.get('source_name', metadata.get('source_file', 'Unknown'))
                 title = metadata.get('title', '')
                 chunk_index = metadata.get('chunk_index', 0)
                 total_chunks = metadata.get('total_chunks', 1)
@@ -45,7 +58,7 @@ class RAGApplication:
                 
                 # Create processed document with metadata
                 processed_doc = {
-                    'id': doc['id'],
+                    'id': doc.get('id', len(processed_docs) + 1),
                     'text': doc['text'],
                     'embedding': self.embedder.generate_embeddings([doc['text']])[0],
                     'source_name': source_name,
@@ -64,7 +77,7 @@ class RAGApplication:
                 self.vector_db.add_documents(processed_docs)
                 logger.info("Documents indexed successfully")
             else:
-                logger.warning("No documents to index")
+                logger.warning("No valid documents to index")
             
         except Exception as e:
             logger.error(f"Error indexing documents: {str(e)}")

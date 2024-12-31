@@ -1,17 +1,16 @@
-version: '3.8'
-
 services:
   web:
     build: .
     ports:
-      - "3000:5000"
+      - "5001:5000"
     volumes:
-      - chroma_data:/app/chroma_db
-      - model_cache:/app/model_cache
-      - huggingface_cache:/app/cache/huggingface
-      - tiktoken_cache:/app/cache/tiktoken
-      - torch_cache:/app/cache/torch
-      - ./uploads:/app/uploads
+      - chroma_data:/app/chroma_db:rw
+      - model_cache:/app/model_cache:rw
+      - huggingface_cache:/app/cache/huggingface:rw
+      - tiktoken_cache:/app/cache/tiktoken:rw
+      - torch_cache:/app/cache/torch:rw
+      - ${PWD}/uploads:/app/uploads:rw  # Use absolute path with PWD
+      - tmp_data:/app/tmp:rw  # Add persistent volume for tmp directory
     env_file:
       - .env
     environment:
@@ -21,7 +20,7 @@ services:
       - TIKTOKEN_CACHE_DIR=/app/cache/tiktoken
       - TORCH_HOME=/app/cache/torch
       - SENTENCE_TRANSFORMERS_HOME=/app/model_cache
-    user: "1000:1000"  # Match the appuser UID:GID
+    user: "1000:1000"  # Run as appuser for security (defined in Dockerfile)
     deploy:
       resources:
         limits:
@@ -30,9 +29,30 @@ services:
         reservations:
           memory: 2G
 
+  frontend:
+    image: node:18
+    working_dir: /app
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+    environment:
+      - REACT_APP_API_URL=http://localhost:5001  # Use localhost since React runs in browser
+      - WATCHPACK_POLLING=true  # Enable hot reloading on Linux
+    command: sh -c "npm install && npm start"
+    depends_on:
+      - web
+
 volumes:
   chroma_data:
+    driver: local
   model_cache:
+    driver: local
   huggingface_cache:
+    driver: local
   tiktoken_cache:
+    driver: local
   torch_cache:
+    driver: local
+  tmp_data:  # Add new volume for tmp directory
+    driver: local

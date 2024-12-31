@@ -11,7 +11,7 @@ if not OPENAI_API_KEY:
 
 # Vector Database Settings
 CHROMA_COLLECTION_NAME = "documentation"
-CHROMA_PERSIST_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "chroma_db")
+CHROMA_PERSIST_DIR = "/app/chroma_db"  # Use absolute path for Docker
 
 # Embedding Model
 EMBEDDING_MODEL_NAME = "all-MiniLM-L6-v2"
