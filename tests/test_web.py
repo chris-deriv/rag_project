@@ -35,6 +35,7 @@ def mock_get_documents():
 def mock_process_document():
     with patch('src.web.process_document') as mock_process:
         mock_process.return_value = [{
+            'id': 1,
             'source_name': 'test.pdf',
             'title': 'Test Document',
             'text': 'Test content',

@@ -39,7 +39,11 @@ def test_add_documents(mock_chroma_client):
     ]
     
     # Configure mock to return empty list for existing docs
-    mock_collection.get.return_value = {'ids': []}
+    mock_collection.get.return_value = {
+        'ids': [],
+        'metadatas': [],
+        'documents': []
+    }
     
     db.add_documents(documents)
     
