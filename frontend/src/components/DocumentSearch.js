@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   TextField,
   List,
@@ -13,97 +13,52 @@ import {
 } from '@mui/material';
 import api from '../api';
 
-const DocumentSearch = ({ onDocumentsSelect, selectedDocuments, onRefresh, refreshTrigger = 0 }) => {
+const DocumentSearch = ({ onDocumentsSelect, selectedDocuments, refreshTrigger = 0 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [documents, setDocuments] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [isProcessing, setIsProcessing] = useState(false);
+  const cachedDocs = useRef([]);
 
-  // Initial document load and processing check
-  const loadDocuments = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const docs = await api.getDocumentNames();
-      
-      // Check if any documents are still processing
-      const hasProcessingDocs = docs.some(doc => !doc.chunk_count || doc.chunk_count === 0);
-      setIsProcessing(hasProcessingDocs);
-      
-      setDocuments(docs);
-    } catch (err) {
-      setError('Error loading documents');
-      console.error('Error loading documents:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Load documents initially and when refreshTrigger changes
+  // Load documents only when refreshTrigger changes
   useEffect(() => {
-    if (!searchQuery) { // Only reload if not currently searching
-      loadDocuments();
-    }
-  }, [refreshTrigger]); // Reload when refreshTrigger changes
-
-  // Set up polling only when documents are processing
-  useEffect(() => {
-    let pollTimeout;
-    let pollCount = 0;
-    const MAX_POLLS = 30; // 60 seconds total
-
-    const pollDocuments = async () => {
-      if (pollCount >= MAX_POLLS) {
-        setIsProcessing(false);
-        return;
-      }
-
+    const loadDocuments = async () => {
       try {
+        setLoading(true);
+        setError(null);
         const docs = await api.getDocumentNames();
-        const hasProcessingDocs = docs.some(doc => !doc.chunk_count || doc.chunk_count === 0);
         
-        setDocuments(docs);
-        if (onRefresh) {
-          onRefresh(docs);
-        }
-
-        if (hasProcessingDocs && pollCount < MAX_POLLS) {
-          pollCount++;
-          pollTimeout = setTimeout(pollDocuments, 2000);
-        } else {
-          setIsProcessing(false);
-        }
+        // Only show completed documents (those with chunks)
+        const completedDocs = docs.filter(doc => doc.chunk_count > 0);
+        cachedDocs.current = completedDocs;
+        setDocuments(completedDocs);
       } catch (err) {
-        console.error('Error polling documents:', err);
-        setIsProcessing(false);
+        setError('Error loading documents');
+        console.error('Error loading documents:', err);
+      } finally {
+        setLoading(false);
       }
     };
 
-    if (isProcessing) {
-      pollTimeout = setTimeout(pollDocuments, 2000);
-    }
-
-    return () => {
-      if (pollTimeout) {
-        clearTimeout(pollTimeout);
-      }
-    };
-  }, [isProcessing, onRefresh]);
+    loadDocuments();
+  }, [refreshTrigger]);
 
   // Handle search
   useEffect(() => {
-    let searchTimeout;
+    if (!searchQuery.trim()) {
+      setDocuments(cachedDocs.current);
+      return;
+    }
 
+    let timeoutId;
     const performSearch = async () => {
-      if (!searchQuery.trim()) {
-        return; // Don't fetch if search is empty
-      }
-
       try {
         setLoading(true);
         const results = await api.searchTitles(searchQuery);
-        setDocuments(results);
+        
+        // Only show completed documents in search results
+        const completedResults = results.filter(doc => doc.chunk_count > 0);
+        setDocuments(completedResults);
       } catch (err) {
         setError('Error searching documents');
         console.error('Error searching documents:', err);
@@ -112,30 +67,17 @@ const DocumentSearch = ({ onDocumentsSelect, selectedDocuments, onRefresh, refre
       }
     };
 
-    if (searchQuery) {
-      searchTimeout = setTimeout(performSearch, 300);
-    }
+    timeoutId = setTimeout(performSearch, 300);
 
     return () => {
-      if (searchTimeout) {
-        clearTimeout(searchTimeout);
+      if (timeoutId) {
+        clearTimeout(timeoutId);
       }
     };
   }, [searchQuery]);
 
-  // Handle search input change
-  const handleSearchChange = (e) => {
-    const value = e.target.value;
-    setSearchQuery(value);
-    if (!value.trim()) {
-      loadDocuments(); // Reload documents when search is cleared
-    }
-  };
-
   // Handle document selection
-  const handleDocumentToggle = (doc) => {
-    if (!doc.chunk_count) return; // Prevent selecting documents that are still processing
-    
+  const handleDocumentToggle = useCallback((doc) => {
     const currentIndex = selectedDocuments.findIndex(
       (d) => d.source_name === doc.source_name
     );
@@ -148,11 +90,11 @@ const DocumentSearch = ({ onDocumentsSelect, selectedDocuments, onRefresh, refre
     }
 
     onDocumentsSelect(newSelected);
-  };
+  }, [selectedDocuments, onDocumentsSelect]);
 
-  const isSelected = (doc) => {
+  const isSelected = useCallback((doc) => {
     return selectedDocuments.findIndex((d) => d.source_name === doc.source_name) !== -1;
-  };
+  }, [selectedDocuments]);
 
   return (
     <Box>
@@ -166,7 +108,7 @@ const DocumentSearch = ({ onDocumentsSelect, selectedDocuments, onRefresh, refre
         label="Search document titles"
         variant="outlined"
         value={searchQuery}
-        onChange={handleSearchChange}
+        onChange={(e) => setSearchQuery(e.target.value)}
         sx={{ mb: 2 }}
       />
 
@@ -183,47 +125,27 @@ const DocumentSearch = ({ onDocumentsSelect, selectedDocuments, onRefresh, refre
       )}
 
       <List sx={{ maxHeight: 'calc(100vh - 400px)', overflow: 'auto' }}>
-        {documents.map((doc, index) => {
-          const isProcessing = !doc.chunk_count || doc.chunk_count === 0;
-          return (
-            <ListItem
-              key={index}
-              dense
-              button
-              onClick={() => !isProcessing && handleDocumentToggle(doc)}
-              sx={{
-                opacity: isProcessing ? 0.7 : 1,
-                cursor: isProcessing ? 'default' : 'pointer',
-                '&:hover': {
-                  backgroundColor: isProcessing ? 'inherit' : undefined
-                }
-              }}
-            >
-              <ListItemIcon>
-                <Checkbox
-                  edge="start"
-                  checked={isSelected(doc)}
-                  tabIndex={-1}
-                  disableRipple
-                  disabled={isProcessing}
-                />
-              </ListItemIcon>
-              <ListItemText
-                primary={doc.title || doc.source_name}
-                secondary={
-                  isProcessing ? (
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <CircularProgress size={16} />
-                      <span>Processing document...</span>
-                    </Box>
-                  ) : (
-                    `${doc.chunk_count} chunks`
-                  )
-                }
+        {documents.map((doc) => (
+          <ListItem
+            key={doc.source_name}
+            dense
+            button
+            onClick={() => handleDocumentToggle(doc)}
+          >
+            <ListItemIcon>
+              <Checkbox
+                edge="start"
+                checked={isSelected(doc)}
+                tabIndex={-1}
+                disableRipple
               />
-            </ListItem>
-          );
-        })}
+            </ListItemIcon>
+            <ListItemText
+              primary={doc.title || doc.source_name}
+              secondary={`${doc.chunk_count} chunks`}
+            />
+          </ListItem>
+        ))}
       </List>
 
       {documents.length === 0 && !loading && (

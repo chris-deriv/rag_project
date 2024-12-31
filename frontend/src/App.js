@@ -6,7 +6,6 @@ import ChatInterface from './components/ChatInterface';
 
 function App() {
   const [selectedDocuments, setSelectedDocuments] = useState([]);
-  const [documentList, setDocumentList] = useState([]);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
   const handleDocumentDelete = (docToDelete) => {
@@ -16,16 +15,9 @@ function App() {
     setSelectedDocuments(newSelected);
   };
 
-  // Handle document list updates
-  const handleDocumentListUpdate = (docs) => {
-    setDocumentList(docs);
-    setRefreshTrigger(prev => prev + 1); // Increment refresh trigger
-    // Remove any selected documents that are no longer in the list
-    setSelectedDocuments(prev => 
-      prev.filter(selected => 
-        docs.some(doc => doc.source_name === selected.source_name)
-      )
-    );
+  // Handle document list updates from FileUpload
+  const handleUploadSuccess = () => {
+    setRefreshTrigger(prev => prev + 1); // Only increment refresh trigger
   };
 
   return (
@@ -44,11 +36,10 @@ function App() {
               p: 2
             }}
           >
-            <FileUpload onUploadSuccess={handleDocumentListUpdate} />
+            <FileUpload onUploadSuccess={handleUploadSuccess} />
             <DocumentSearch
               onDocumentsSelect={setSelectedDocuments}
               selectedDocuments={selectedDocuments}
-              onRefresh={handleDocumentListUpdate}
               refreshTrigger={refreshTrigger}
             />
           </Paper>

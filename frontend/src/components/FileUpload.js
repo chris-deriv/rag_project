@@ -64,10 +64,8 @@ const FileUpload = ({ onUploadSuccess }) => {
       
       if (status.status === 'completed') {
         setUploading(false);
-        // Get final document list
-        const docs = await api.getDocumentNames();
         if (onUploadSuccess) {
-          onUploadSuccess(docs);
+          onUploadSuccess(); // Just trigger refresh, no need to pass docs
         }
       } else if (status.status === 'error') {
         setError(status.error || 'Error processing document');
@@ -79,14 +77,14 @@ const FileUpload = ({ onUploadSuccess }) => {
       }
     } catch (err) {
       if (err.response?.status === 404) {
-        // Document not found in processing list, try getting document list
+        // Document not found in processing list, check if it's in the document list
         try {
           const docs = await api.getDocumentNames();
           const doc = docs.find(d => d.source_name === filename);
-          if (doc) {
+          if (doc && doc.chunk_count > 0) {
             setUploading(false);
             if (onUploadSuccess) {
-              onUploadSuccess(docs);
+              onUploadSuccess(); // Just trigger refresh, no need to pass docs
             }
             return;
           }
@@ -107,10 +105,8 @@ const FileUpload = ({ onUploadSuccess }) => {
     try {
       await api.resetDatabase();
       setSuccess(true);
-      // Get updated document list after reset
-      const docs = await api.getDocumentNames();
       if (onUploadSuccess) {
-        onUploadSuccess(docs);
+        onUploadSuccess(); // Just trigger refresh, no need to pass docs
       }
     } catch (err) {
       setError(err.response?.data?.error || 'Error resetting database');
