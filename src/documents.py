@@ -89,6 +89,42 @@ class DocumentProcessor:
         text = ' '.join(text.split())
         
         return text.strip()
+
+    def _clean_title(self, title: str) -> str:
+        """Clean and normalize document title."""
+        if not title:
+            return ""
+        
+        # Convert to string if not already
+        title = str(title)
+        
+        # Fix encoding issues
+        from ftfy import fix_text
+        title = fix_text(title)
+        
+        # Remove extra spaces, including within words
+        title = re.sub(r'\s+', ' ', title)  # Normalize all whitespace to single space
+        title = re.sub(r'(?<=\w)\s+(?=\w)', '', title)  # Remove spaces between parts of words
+        title = title.strip()
+        
+        return title
+    
+    def _get_base_metadata(self, file_path: str, title: Optional[str] = None) -> Dict[str, str]:
+        """Get base metadata for a document."""
+        # Get filename and extension
+        filename = os.path.basename(file_path)
+        file_ext = os.path.splitext(filename)[1].lower()[1:]  # Remove the dot
+        
+        # If no title provided, use filename without extension
+        if not title:
+            title = os.path.splitext(filename)[0]
+        
+        return {
+            'source_name': filename,
+            'file_type': file_ext,
+            'title': title,
+            'section_type': 'content'  # Default section type
+        }
     
     def _convert_doc_to_docx(self, file_path: str) -> str:
         """Convert a .doc file to .docx format using LibreOffice."""
@@ -171,19 +207,13 @@ class DocumentProcessor:
             if hasattr(doc, 'core_properties') and doc.core_properties:
                 title = doc.core_properties.title
                 if title:
-                    title = title.strip()
+                    title = self._clean_title(title)
             
-            # If no title found, use filename without extension
-            if not title:
-                title = os.path.splitext(os.path.basename(file_path))[0]
+            # Get base metadata
+            base_metadata = self._get_base_metadata(file_path, title)
             
             # Create at least one section even if there's no content
-            # This ensures we preserve the document title
-            current_section = {'text': [], 'metadata': {
-                'section_type': 'body',
-                'title': title,
-                'source_name': os.path.basename(file_path)
-            }}
+            current_section = {'text': [], 'metadata': base_metadata}
             
             for paragraph in doc.paragraphs:
                 # Skip empty paragraphs
@@ -200,17 +230,18 @@ class DocumentProcessor:
                         })
                     
                     # Start new section
+                    section_metadata = base_metadata.copy()
+                    section_metadata.update({
+                        'section_type': paragraph.style.name,
+                        'section_title': paragraph.text,
+                        'heading_level': int(paragraph.style.name[-1]) 
+                        if paragraph.style.name.startswith('Heading') 
+                        else 0
+                    })
+                    
                     current_section = {
                         'text': [paragraph.text],
-                        'metadata': {
-                            'section_type': paragraph.style.name,
-                            'section_title': paragraph.text,
-                            'heading_level': int(paragraph.style.name[-1]) 
-                            if paragraph.style.name.startswith('Heading') 
-                            else 0,
-                            'title': title,
-                            'source_name': os.path.basename(file_path)
-                        }
+                        'metadata': section_metadata
                     }
                 else:
                     # Clean and add paragraph text
@@ -244,7 +275,7 @@ class DocumentProcessor:
                 except:
                     pass
     
-    def _extract_pdf_text(self, file_or_path: Union[str, BinaryIO]) -> List[Dict[str, str]]:
+    def _extract_pdf_text(self, file_path: str) -> List[Dict[str, str]]:
         """Extract text from PDF with metadata."""
         result = []
         
@@ -252,7 +283,7 @@ class DocumentProcessor:
             warnings.filterwarnings("ignore")
             
             try:
-                reader = PdfReader(file_or_path, strict=False)
+                reader = PdfReader(file_path, strict=False)
                 
                 # Extract document title from metadata
                 title = None
@@ -260,37 +291,11 @@ class DocumentProcessor:
                     title = reader.metadata['/Title']
                     if isinstance(title, bytes):
                         title = title.decode('utf-8', errors='ignore')
-                    title = title.strip()
+                    title = self._clean_title(title)
                 
-                # If no title in metadata, try to get it from the first page text
-                if not title and len(reader.pages) > 0:
-                    first_page_text = reader.pages[0].extract_text()
-                    first_lines = [line.strip() for line in first_page_text.split('\n') if line.strip()][:3]
-                    for line in first_lines:
-                        # Look for a line that appears to be a title:
-                        # - Starts with a capital letter
-                        # - No sentence endings
-                        # - Not too long
-                        # - Not all caps (likely a header)
-                        if (line and len(line) < 100 and 
-                            re.match(r'^[A-Z]', line) and 
-                            not re.search(r'[.!?]$', line) and
-                            not line.isupper()):
-                            title = line
-                            break
-                
-                # If still no title, use filename without extension
-                if not title:
-                    if isinstance(file_or_path, str):
-                        title = os.path.splitext(os.path.basename(file_or_path))[0]
-                    else:
-                        title = "Untitled Document"
-                
-                metadata = {
-                    'title': title,
-                    'file_type': 'pdf',
-                    'source_name': os.path.basename(file_or_path) if isinstance(file_or_path, str) else "uploaded.pdf"
-                }
+                # Get base metadata with title if found
+                base_metadata = self._get_base_metadata(file_path, title)
+                logger.info(f"PDF metadata: {base_metadata}")
                 
                 # Process each page
                 for i, page in enumerate(reader.pages):
@@ -322,7 +327,7 @@ class DocumentProcessor:
                             if is_header:
                                 # Save previous section if it has content
                                 if current_section["text"]:
-                                    section_metadata = metadata.copy()
+                                    section_metadata = base_metadata.copy()
                                     section_metadata.update({
                                         'section_type': current_section["type"],
                                         'section_title': current_section["title"],
@@ -346,7 +351,7 @@ class DocumentProcessor:
                         
                         # Add final section
                         if current_section["text"]:
-                            section_metadata = metadata.copy()
+                            section_metadata = base_metadata.copy()
                             section_metadata.update({
                                 'section_type': current_section["type"],
                                 'section_title': current_section["title"],
@@ -371,7 +376,7 @@ class DocumentProcessor:
                     result.append({
                         'text': '',
                         'metadata': {
-                            **metadata,
+                            **base_metadata,
                             'section_type': 'content',
                             'section_title': '',
                             'page_number': 1,
@@ -383,7 +388,7 @@ class DocumentProcessor:
                 return result
                 
             except Exception as e:
-                logger.error(f"Error processing PDF {file_or_path}: {str(e)}")
+                logger.error(f"Error processing PDF {file_path}: {str(e)}")
                 return []
     
     def process_document(self, file_or_path: Union[str, BinaryIO]) -> List[DocumentChunk]:
@@ -392,8 +397,9 @@ class DocumentProcessor:
             file_ext = os.path.splitext(file_or_path)[1].lower()
             file_name = os.path.basename(file_or_path)
         else:
-            file_ext = '.pdf'
-            file_name = 'uploaded.pdf'
+            # For file objects (like web uploads), we should already have the file saved
+            # and be passing the filepath as a string
+            raise ValueError("File objects not supported - save to disk first")
         
         logger.info(f"\n{'='*80}\nProcessing document: {file_name}\n{'='*80}")
         
@@ -414,15 +420,12 @@ class DocumentProcessor:
         # Handle empty documents
         if not sections:
             # Create a single empty chunk with basic metadata
+            base_metadata = self._get_base_metadata(file_name)
             chunks.append(DocumentChunk(
                 id=1,
                 text="",
                 metadata={
-                    'source_name': file_name,
-                    'file_type': file_ext[1:],
-                    'title': os.path.splitext(file_name)[0],
-                    'section_type': 'content',
-                    'section_title': '',
+                    **base_metadata,
                     'chunk_size': 0,
                     'token_count': 0,
                     'chunk_index': 0,
@@ -438,11 +441,7 @@ class DocumentProcessor:
         
         for section_idx, section in enumerate(sections, 1):
             text = section['text']
-            base_metadata = {
-                'source_name': file_name,
-                'file_type': file_ext[1:],
-                **section['metadata']
-            }
+            base_metadata = section['metadata']
             
             logger.info(f"\n{'-'*80}\nProcessing Section {section_idx}/{len(sections)}")
             logger.info(f"Section Title: {base_metadata.get('section_title', 'Untitled')}")
@@ -531,27 +530,46 @@ class DocumentStore:
     def add_document(self, file_path: str) -> None:
         """Process and add a document to the store."""
         try:
+            logger.info(f"\nAdding document to store: {file_path}")
+            
             # Process the document into chunks
             chunks = self.processor.process_document(file_path)
+            logger.info(f"Generated {len(chunks)} chunks")
+            
+            if chunks:
+                logger.info(f"First chunk metadata: {chunks[0].metadata}")
+                logger.info(f"Using source_name: {chunks[0].metadata.get('source_name', 'Unknown')}")
             
             # Extract texts for embedding generation
             texts = [chunk.text for chunk in chunks]
             
             # Generate embeddings for all texts
             embeddings = self.embedding_generator.generate_embeddings(texts)
+            logger.info(f"Generated {len(embeddings)} embeddings")
             
             # Convert chunks to the format expected by VectorDatabase
             documents = []
             for i, chunk in enumerate(chunks):
-                documents.append({
+                doc = {
                     "id": chunk.id,
                     "text": chunk.text,
                     "embedding": embeddings[i],
                     **chunk.metadata
-                })
+                }
+                documents.append(doc)
+                logger.info(f"Chunk {i+1}/{len(chunks)}: ID={doc['id']}, source_name={doc.get('source_name', 'Unknown')}")
             
             # Add documents with embeddings to ChromaDB
+            logger.info("Adding documents to ChromaDB...")
             self.db.add_documents(documents)
+            logger.info("Documents added successfully")
+            
+            # Verify document was added
+            source_name = chunks[0].metadata.get('source_name', 'Unknown')
+            doc_chunks = self.db.get_document_chunks(source_name)
+            if not doc_chunks:
+                raise ValueError(f"Could not find {source_name} in vector database after adding")
+            logger.info(f"Added {source_name} to vector database")
             
         except Exception as e:
             logger.error(f"Error adding document: {str(e)}")

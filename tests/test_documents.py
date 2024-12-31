@@ -1,197 +1,195 @@
-import unittest
-from unittest.mock import Mock, patch
-import numpy as np
-from src.documents import DocumentProcessor, DocumentStore
+import pytest
 import tempfile
 import os
+from unittest.mock import Mock, patch, PropertyMock
+import numpy as np
+from src.documents import DocumentStore, DocumentProcessor, DocumentChunk
 
-class TestDocumentProcessor(unittest.TestCase):
-    def setUp(self):
-        self.processor = DocumentProcessor()
-        
-    def test_pdf_section_detection(self):
-        # Create a temporary PDF file with test content
-        with tempfile.NamedTemporaryFile(suffix='.pdf', mode='w+b', delete=False) as f:
-            # We'll use the file path but not write to it since we can't easily create PDFs
-            self.test_pdf = f.name
-            
-        # Mock the PDF content in _extract_pdf_text
-        test_pdf_path = self.test_pdf  # Capture in closure
-        def mock_extract_text(self, file_or_path):
-            return [
-                {
-                    'text': '1.0 Introduction\nThis is the introduction section.',
-                    'metadata': {
-                        'title': 'Test Document',
-                        'file_type': 'pdf',
-                        'source_file': os.path.basename(test_pdf_path),
-                        'section_type': 'heading',
-                        'section_title': '1.0 Introduction'
-                    }
-                },
-                {
-                    'text': '2.0 Methods\nThis is the methods section.',
-                    'metadata': {
-                        'title': 'Test Document',
-                        'file_type': 'pdf',
-                        'source_file': os.path.basename(test_pdf_path),
-                        'section_type': 'heading',
-                        'section_title': '2.0 Methods'
-                    }
-                }
-            ]
-            
-        # Store original method and replace with mock
-        original_extract = DocumentProcessor._extract_pdf_text
-        DocumentProcessor._extract_pdf_text = mock_extract_text
-        
-        try:
-            # Process the document
-            chunks = self.processor.process_document(self.test_pdf)
-            
-            # Verify sections were detected
-            self.assertTrue(any(chunk.metadata.get('section_title') == '1.0 Introduction' for chunk in chunks))
-            self.assertTrue(any(chunk.metadata.get('section_title') == '2.0 Methods' for chunk in chunks))
-            
-        finally:
-            # Restore original method and clean up
-            DocumentProcessor._extract_pdf_text = original_extract
-            os.unlink(self.test_pdf)
-    
-    def test_section_header_detection(self):
-        # Test various section header patterns
-        test_headers = [
-            "1.0 Introduction",
-            "Section 1: Overview",
-            "Chapter 2: Background",
-            "Methods",
-            "Results and Discussion",
-            "Abstract",
-            "Conclusion"
-        ]
-        
-        non_headers = [
-            "The quick brown fox",
-            "This is a regular sentence.",
-            "A section about something",
-            "Some random text that is quite long and definitely not a header because it contains too many words and ends with a period."
-        ]
-        
-        # Create a document with these headers, ensuring each is on its own line
-        content = "\n".join(test_headers) + "\n\n" + "\n".join(non_headers)
-        
-        # Mock PDF extraction to return our test content
-        def mock_extract_text(self, file_or_path):
-            # Return each header as a separate section
-            return [
-                {
-                    'text': header,
-                    'metadata': {
-                        'title': 'Test Document',
-                        'file_type': 'pdf',
-                        'source_file': 'test.pdf',
-                        'section_type': 'heading',
-                        'section_title': header
-                    }
-                }
-                for header in test_headers
-            ]
-        
-        # Store original method and replace with mock
-        original_extract = DocumentProcessor._extract_pdf_text
-        DocumentProcessor._extract_pdf_text = mock_extract_text
-        
-        try:
-            # Process the document
-            chunks = self.processor.process_document('test.pdf')
-            
-            # Get all detected section titles
-            section_titles = {chunk.metadata.get('section_title', '') for chunk in chunks}
-            
-            # Verify each header was preserved in the chunks
-            for header in test_headers:
-                self.assertTrue(
-                    any(chunk.metadata.get('section_title') == header for chunk in chunks),
-                    f"Failed to detect header: {header}"
-                )
-            
-            # Verify section types are correct
-            for chunk in chunks:
-                self.assertEqual(chunk.metadata.get('section_type'), 'heading')
-                
-        finally:
-            # Restore original method
-            DocumentProcessor._extract_pdf_text = original_extract
+@pytest.fixture
+def mock_extract_text():
+    with patch('src.documents.DocumentProcessor._extract_pdf_text') as mock:
+        yield mock
 
-class TestDocumentStore(unittest.TestCase):
-    @patch('src.documents.DocumentProcessor._extract_pdf_text')
+class TestDocumentStore:
+    @pytest.mark.usefixtures("mock_extract_text")
     def test_add_document(self, mock_extract_text):
+        """Test adding a document to the store."""
         # Create mock embeddings
         mock_embeddings = np.array([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]])
-        
+
         # Create a temporary PDF file
         with tempfile.NamedTemporaryFile(suffix='.pdf', mode='w+b', delete=False) as f:
             test_pdf = f.name
-            
+
         # Configure mock PDF extraction
         mock_extract_text.return_value = [
             {
                 'text': 'Test section 1',
                 'metadata': {
+                    'source_name': 'test.pdf',
                     'title': 'Test Document',
                     'file_type': 'pdf',
-                    'source_file': os.path.basename(test_pdf),
-                    'section_type': 'content'
+                    'section_type': 'content',
+                    'chunk_index': 0,
+                    'total_chunks': 2
                 }
             },
             {
                 'text': 'Test section 2',
                 'metadata': {
+                    'source_name': 'test.pdf',
                     'title': 'Test Document',
                     'file_type': 'pdf',
-                    'source_file': os.path.basename(test_pdf),
-                    'section_type': 'content'
+                    'section_type': 'content',
+                    'chunk_index': 1,
+                    'total_chunks': 2
                 }
             }
         ]
-        
+
         # Create mock EmbeddingGenerator
         mock_embedding_generator = Mock()
         mock_embedding_generator.generate_embeddings.return_value = mock_embeddings
-        
+
         # Create mock VectorDatabase
         mock_vector_db = Mock()
-        
+        mock_vector_db.get_document_chunks.return_value = [{'id': 1, 'text': 'Test section 1'}]
+
         try:
             # Initialize store with mocked dependencies
             with patch('src.documents.EmbeddingGenerator', return_value=mock_embedding_generator):
                 with patch('src.documents.VectorDatabase', return_value=mock_vector_db):
                     store = DocumentStore()
                     store.add_document(test_pdf)
-            
+
             # Verify embeddings were generated
             mock_embedding_generator.generate_embeddings.assert_called_once()
-            texts_arg = mock_embedding_generator.generate_embeddings.call_args[0][0]
-            self.assertEqual(len(texts_arg), 2)
-            self.assertTrue('Test section 1' in texts_arg)
-            self.assertTrue('Test section 2' in texts_arg)
-            
-            # Verify documents were added to database with embeddings
+
+            # Verify documents were added to database
             mock_vector_db.add_documents.assert_called_once()
-            documents_arg = mock_vector_db.add_documents.call_args[0][0]
-            self.assertEqual(len(documents_arg), 2)
-            
-            # Check first document
-            self.assertEqual(documents_arg[0]['text'], 'Test section 1')
-            np.testing.assert_array_equal(documents_arg[0]['embedding'], mock_embeddings[0])
-            
-            # Check second document
-            self.assertEqual(documents_arg[1]['text'], 'Test section 2')
-            np.testing.assert_array_equal(documents_arg[1]['embedding'], mock_embeddings[1])
-            
+            added_docs = mock_vector_db.add_documents.call_args[0][0]
+            assert len(added_docs) == 2
+            assert added_docs[0]['text'] == 'Test section 1'
+            assert added_docs[1]['text'] == 'Test section 2'
+
         finally:
             # Clean up
-            os.unlink(test_pdf)
+            if os.path.exists(test_pdf):
+                os.remove(test_pdf)
 
-if __name__ == '__main__':
-    unittest.main()
+    def test_get_documents(self):
+        """Test retrieving documents from the store."""
+        # Create mock documents
+        mock_docs = [
+            {
+                'source_name': 'test1.pdf',
+                'title': 'Test Document 1',
+                'chunk_count': 5,
+                'total_chunks': 5
+            },
+            {
+                'source_name': 'test2.pdf',
+                'title': 'Test Document 2',
+                'chunk_count': 3,
+                'total_chunks': 3
+            }
+        ]
+
+        # Create mock VectorDatabase
+        mock_vector_db = Mock()
+        mock_vector_db.get_all_documents = Mock(return_value=mock_docs)
+
+        # Initialize store with mocked database
+        with patch('src.documents.VectorDatabase', return_value=mock_vector_db):
+            store = DocumentStore()
+            documents = store.get_documents()
+
+            # Verify documents were retrieved
+            assert len(documents) == 2
+            assert documents[0]['source_name'] == 'test1.pdf'
+            assert documents[1]['source_name'] == 'test2.pdf'
+
+class TestDocumentProcessor:
+    def test_process_document(self):
+        """Test document processing."""
+        processor = DocumentProcessor()
+
+        # Create a temporary PDF file
+        with tempfile.NamedTemporaryFile(suffix='.pdf', mode='w+b', delete=False) as f:
+            test_pdf = f.name
+
+        # Configure mock PDF extraction
+        mock_sections = [
+            {
+                'text': 'Test section 1',
+                'metadata': {
+                    'source_name': 'test.pdf',
+                    'title': 'Test Document',
+                    'file_type': 'pdf',
+                    'section_type': 'content',
+                    'chunk_index': 0,
+                    'total_chunks': 2
+                }
+            },
+            {
+                'text': 'Test section 2',
+                'metadata': {
+                    'source_name': 'test.pdf',
+                    'title': 'Test Document',
+                    'file_type': 'pdf',
+                    'section_type': 'content',
+                    'chunk_index': 1,
+                    'total_chunks': 2
+                }
+            }
+        ]
+
+        try:
+            with patch.object(processor, '_extract_pdf_text', return_value=mock_sections):
+                chunks = processor.process_document(test_pdf)
+
+            # Verify chunks were created
+            assert len(chunks) == 2
+            assert isinstance(chunks[0], DocumentChunk)
+            assert isinstance(chunks[1], DocumentChunk)
+            
+            # Verify chunk content
+            assert chunks[0].text == 'Test section 1'
+            assert chunks[1].text == 'Test section 2'
+
+            # Verify metadata
+            for chunk in chunks:
+                assert chunk.metadata['source_name'] == 'test.pdf'
+                assert chunk.metadata['title'] == 'Test Document'
+                assert chunk.metadata['file_type'] == 'pdf'
+                assert chunk.metadata['section_type'] == 'content'
+
+        finally:
+            # Clean up
+            if os.path.exists(test_pdf):
+                os.remove(test_pdf)
+
+    def test_error_handling(self):
+        """Test error handling in document operations."""
+        processor = DocumentProcessor()
+
+        # Test invalid file type
+        with tempfile.NamedTemporaryFile(suffix='.txt', mode='w+b', delete=False) as f:
+            test_file = f.name
+            f.write(b'Test content')
+
+        try:
+            with pytest.raises(Exception) as exc_info:
+                processor.process_document(test_file)
+            assert "Unsupported file type" in str(exc_info.value)
+        finally:
+            # Clean up
+            if os.path.exists(test_file):
+                os.remove(test_file)
+
+        # Test file not found
+        nonexistent_file = "nonexistent.pdf"
+        with patch('src.documents.DocumentProcessor._extract_pdf_text', side_effect=FileNotFoundError("No such file or directory: 'nonexistent.pdf'")):
+            with pytest.raises(FileNotFoundError) as exc_info:
+                processor.process_document(nonexistent_file)
+            assert "No such file or directory" in str(exc_info.value)

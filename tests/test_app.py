@@ -93,7 +93,26 @@ class TestRAGApplication(unittest.TestCase):
             ]]
         }
 
-        with patch.object(self.app.vector_db, 'query', return_value=mock_results):
+        with patch.object(self.app.search_engine, 'search', return_value=[
+            {
+                'text': 'text1',
+                'metadata': {
+                    'text': 'text1',
+                    'source_name': 'doc1',
+                    'title': 'title1',
+                    'chunk_index': 0
+                }
+            },
+            {
+                'text': 'text2',
+                'metadata': {
+                    'text': 'text2',
+                    'source_name': 'doc2',
+                    'title': 'title2',
+                    'chunk_index': 0
+                }
+            }
+        ]):
             with patch.object(self.app.chatbot, 'generate_response_with_sources', return_value="test response") as mock_generate:
                 response = self.app.query_documents("test query")
 
@@ -101,6 +120,86 @@ class TestRAGApplication(unittest.TestCase):
                 contexts = mock_generate.call_args[0][0]
                 self.assertEqual(contexts[0]["source"], "doc1")
                 self.assertEqual(contexts[1]["source"], "doc2")
+
+    @patch('src.embedding.EmbeddingGenerator.generate_embeddings')
+    def test_query_documents_with_source_names(self, mock_generate_embeddings):
+        """Test query processing with source names filter."""
+        # Setup mock embeddings
+        mock_embedding = np.array([0.1, 0.2, 0.3])
+        mock_generate_embeddings.return_value = np.array([mock_embedding])
+
+        # Setup mock database results
+        mock_results = {
+            "metadatas": [[
+                {
+                    "text": "text1",
+                    "source_name": "doc1.pdf",
+                    "title": "title1",
+                    "chunk_index": 0
+                }
+            ]]
+        }
+
+        with patch.object(self.app.search_engine, 'search', return_value=[{
+            'text': 'text1',
+            'metadata': {
+                'text': 'text1',
+                'source_name': 'doc1.pdf',
+                'title': 'title1',
+                'chunk_index': 0
+            }
+        }]) as mock_search:
+            with patch.object(self.app.chatbot, 'generate_response_with_sources', return_value="test response"):
+                source_names = ["doc1.pdf", "doc2.pdf"]
+                response = self.app.query_documents("test query", source_names=source_names)
+
+                # Verify source_names was passed to search
+                mock_search.assert_called_once()
+                call_kwargs = mock_search.call_args[1]
+                self.assertEqual(call_kwargs['source_names'], source_names)
+
+    @patch('src.embedding.EmbeddingGenerator.generate_embeddings')
+    def test_query_documents_with_source_names_and_title(self, mock_generate_embeddings):
+        """Test query processing with both source names and title filters."""
+        # Setup mock embeddings
+        mock_embedding = np.array([0.1, 0.2, 0.3])
+        mock_generate_embeddings.return_value = np.array([mock_embedding])
+
+        # Setup mock database results
+        mock_results = {
+            "metadatas": [[
+                {
+                    "text": "text1",
+                    "source_name": "doc1.pdf",
+                    "title": "Python Guide",
+                    "chunk_index": 0
+                }
+            ]]
+        }
+
+        with patch.object(self.app.search_engine, 'search', return_value=[{
+            'text': 'text1',
+            'metadata': {
+                'text': 'text1',
+                'source_name': 'doc1.pdf',
+                'title': 'Python Guide',
+                'chunk_index': 0
+            }
+        }]) as mock_search:
+            with patch.object(self.app.chatbot, 'generate_response_with_sources', return_value="test response"):
+                source_names = ["doc1.pdf", "doc2.pdf"]
+                title = "python"
+                response = self.app.query_documents(
+                    "test query",
+                    source_names=source_names,
+                    title=title
+                )
+
+                # Verify both filters were passed to search
+                mock_search.assert_called_once()
+                call_kwargs = mock_search.call_args[1]
+                self.assertEqual(call_kwargs['source_names'], source_names)
+                self.assertEqual(call_kwargs['title'], title)
 
     def test_error_handling(self):
         """Test error handling in main operations."""

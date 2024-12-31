@@ -4,6 +4,7 @@ from .embedding import EmbeddingGenerator
 from .database import VectorDatabase
 from .chatbot import Chatbot
 from .documents import get_documents, document_store
+from .search import SearchEngine
 
 logging.basicConfig(
     level=logging.INFO,
@@ -18,6 +19,7 @@ class RAGApplication:
         self.embedder = EmbeddingGenerator()
         self.vector_db = document_store.db  # Use the same instance from DocumentStore
         self.chatbot = Chatbot()
+        self.search_engine = SearchEngine()
 
     def index_documents(self, documents: List[Dict[str, Any]]) -> None:
         """
@@ -105,7 +107,7 @@ class RAGApplication:
     def query_documents(self, 
                        query: str, 
                        n_results: int = 5,
-                       source_name: Optional[str] = None,
+                       source_names: Optional[List[str]] = None,
                        title: Optional[str] = None) -> str:
         """
         Process a query and return a response based on relevant documents.
@@ -113,7 +115,7 @@ class RAGApplication:
         Args:
             query: The user's question
             n_results: Number of relevant documents to retrieve
-            source_name: Optional filter by source filename
+            source_names: Optional list of source filenames to filter by
             title: Optional filter by document title
             
         Returns:
@@ -121,27 +123,28 @@ class RAGApplication:
         """
         try:
             logger.info(f"Processing query: {query}")
+            if source_names:
+                logger.info(f"Filtering by source names: {source_names}")
+            if title:
+                logger.info(f"Filtering by title: {title}")
             
-            # Generate embedding for the query
-            query_embedding = self.embedder.generate_embeddings([query])[0]
-            
-            # Retrieve relevant documents with optional filters
-            results = self.vector_db.query(
-                query_embedding, 
+            # Use SearchEngine to get relevant documents
+            results = self.search_engine.search(
+                query=query,
                 n_results=n_results,
-                source_name=source_name,
+                source_names=source_names,
                 title=title
             )
             
             # Extract contexts from results with source information
             contexts = []
-            for i, metadata in enumerate(results["metadatas"][0]):
+            for result in results:
                 context = {
-                    "text": metadata["text"],
-                    "source": metadata.get("source_name", "Unknown"),
-                    "title": metadata.get("title", ""),
-                    "chunk_index": metadata.get("chunk_index", 0),
-                    "total_chunks": metadata.get("total_chunks", 1)
+                    "text": result['text'],
+                    "source": result['metadata'].get('source_name', 'Unknown'),
+                    "title": result['metadata'].get('title', ''),
+                    "chunk_index": result['metadata'].get('chunk_index', 0),
+                    "total_chunks": result['metadata'].get('total_chunks', 1)
                 }
                 contexts.append(context)
             

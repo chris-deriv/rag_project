@@ -1,8 +1,11 @@
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import numpy as np
+import logging
 from .embedding import EmbeddingGenerator
 from .database import VectorDatabase
 from .chatbot import Chatbot
+
+logger = logging.getLogger(__name__)
 
 class SearchEngine:
     def __init__(self):
@@ -57,13 +60,19 @@ class SearchEngine:
         except Exception as e:
             raise Exception(f"Embedding generation failed: {str(e)}")
 
-    def perform_similarity_search(self, query_embedding: np.ndarray, n_results: int = 10) -> Dict[str, Any]:
+    def perform_similarity_search(self, 
+                                query_embedding: np.ndarray, 
+                                n_results: int = 10,
+                                source_names: Optional[List[str]] = None,
+                                title: Optional[str] = None) -> Dict[str, Any]:
         """
         Perform similarity search in the vector database.
         
         Args:
             query_embedding: The query embedding vector
             n_results: Number of results to retrieve (default: 10)
+            source_names: Optional list of source filenames to filter by
+            title: Optional filter by document title
             
         Returns:
             Dict containing search results with distances and metadata
@@ -75,21 +84,60 @@ class SearchEngine:
             raise Exception("n_results must be a positive integer")
             
         try:
-            results = self.vector_db.query(query_embedding, n_results=n_results)
+            results = self.vector_db.query(
+                query_embedding=query_embedding, 
+                n_results=n_results,
+                source_names=source_names,
+                title=title
+            )
             
             # Ensure results have expected structure
             if not all(key in results for key in ['ids', 'distances', 'metadatas']):
                 raise Exception("Invalid results structure from database")
                 
-            # Sort results by distance and ID for consistent ordering
-            sorted_indices = np.lexsort((results['ids'][0], results['distances'][0]))
+            # Handle empty results case first
+            ids = results['ids'][0]
+            if isinstance(ids, np.ndarray):
+                if ids.size == 0:  # Use size for numpy arrays
+                    return {
+                        'ids': [[]],
+                        'distances': [[]],
+                        'metadatas': [[]]
+                    }
+            elif len(ids) == 0:  # Use len for lists
+                return {
+                    'ids': [[]],
+                    'distances': [[]],
+                    'metadatas': [[]]
+                }
+                
+            # Convert numpy arrays to lists if necessary
+            ids = ids.tolist() if isinstance(ids, np.ndarray) else ids
+            distances = results['distances'][0].tolist() if isinstance(results['distances'][0], np.ndarray) else results['distances'][0]
+            metadatas = results['metadatas'][0]
+                
+            # Log initial search results
+            logger.info("\nInitial similarity search results:")
+            for d, i, m in zip(distances, ids, metadatas):
+                logger.info(f"Distance: {d:.4f}, ID: {i}, Text: {m['text'][:50]}...")
+
+            # Sort results by distance first, then by ID for consistent ordering
+            # Create a list of tuples with all the data
+            sorted_data = sorted(zip(distances, ids, metadatas), key=lambda x: (x[0], x[1]))
             
-            # Reorder all result arrays using the sorted indices
-            results['ids'][0] = [results['ids'][0][i] for i in sorted_indices]
-            results['distances'][0] = [results['distances'][0][i] for i in sorted_indices]
-            results['metadatas'][0] = [results['metadatas'][0][i] for i in sorted_indices]
+            # Unzip the sorted data back into separate lists
+            sorted_distances, sorted_ids, sorted_metadatas = zip(*sorted_data)
+
+            logger.info("\nSorted similarity search results:")
+            for d, i, m in zip(sorted_distances, sorted_ids, sorted_metadatas):
+                logger.info(f"Distance: {d:.4f}, ID: {i}, Text: {m['text'][:50]}...")
             
-            return results
+            # Return results in the expected format
+            return {
+                'ids': [list(sorted_ids)],
+                'distances': [list(sorted_distances)],
+                'metadatas': [list(sorted_metadatas)]
+            }
         except Exception as e:
             raise Exception(f"Database query failed: {str(e)}")
 
@@ -209,18 +257,31 @@ class SearchEngine:
                 'combined_score': combined_score
             })
         
+        logger.info(f"\nReranking results for query: {query}")
+        logger.info("Pre-rerank ordering:")
+        for r in results:
+            logger.info(f"ID: {r['id']}, Text: {r['text'][:50]}...")
+            logger.info(f"  Similarity: {r['similarity_score']:.4f}, Relevance: {r['relevance_score']:.4f}, Combined: {r['combined_score']:.4f}")
+
         # Sort by combined score and ID for consistent ordering
         results.sort(key=lambda x: (-x['combined_score'], x['id']))
+
+        logger.info("\nPost-rerank ordering:")
+        for r in results:
+            logger.info(f"ID: {r['id']}, Text: {r['text'][:50]}...")
+            logger.info(f"  Similarity: {r['similarity_score']:.4f}, Relevance: {r['relevance_score']:.4f}, Combined: {r['combined_score']:.4f}")
         
         return results
 
-    def search(self, query: str, n_results: int = 5) -> List[Dict[str, Any]]:
+    def search(self, query: str, n_results: int = 5, source_names: Optional[List[str]] = None, title: Optional[str] = None) -> List[Dict[str, Any]]:
         """
         Perform the complete search process from query to ranked results.
         
         Args:
             query (str): The user's natural language query
             n_results (int): Number of results to return (default: 5)
+            source_names (Optional[List[str]]): Optional list of source filenames to filter by
+            title (Optional[str]): Optional filter by document title
             
         Returns:
             List of relevant chunks with metadata, ordered by relevance
@@ -232,6 +293,12 @@ class SearchEngine:
             raise Exception("Error performing search: n_results must be a positive integer")
             
         try:
+            # Log search parameters
+            logger.info(f"Query filters - source_names: {source_names}, title: {title}")
+            logger.info(f"Processing query: {query}")
+            if source_names:
+                logger.info(f"Filtering by source names: {source_names}")
+            
             # 1. Parse query
             parsed_query = self.parse_query(query)
             
@@ -240,7 +307,12 @@ class SearchEngine:
             
             # 3. Perform similarity search
             # Get more results than needed for reranking
-            search_results = self.perform_similarity_search(query_embedding, n_results=n_results * 2)
+            search_results = self.perform_similarity_search(
+                query_embedding=query_embedding,
+                n_results=n_results * 2,
+                source_names=source_names,
+                title=title
+            )
             
             # 4. Rerank results
             reranked_results = self.rerank_results(query, search_results)

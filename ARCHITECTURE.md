@@ -63,31 +63,47 @@ def query(self,
   - Primary sort by vector similarity
   - Secondary sort by document metadata
 
-5. **Similarity Search**
+5. **Two-Stage Similarity Search**
+
+The system implements a sophisticated two-stage search process combining vector similarity with LLM-based reranking:
+
+Stage 1: Vector Similarity
 ```python
 def perform_similarity_search(self, query_embedding: np.ndarray, n_results: int) -> Dict[str, Any]:
 ```
+- Implementation:
+  - Uses sentence-transformers to generate embeddings
+  - ChromaDB performs cosine similarity search
+  - Configured with "hnsw:space": "cosine" for accurate similarity calculations
 - Deterministic ordering:
   - Primary sort by distance
   - Secondary sort by document ID for ties
-- Consistent result structure
-- Configurable result count
+- Performance optimizations:
+  - Efficient vector indexing through ChromaDB
+  - Cached embeddings for documents
+  - Optimized similarity calculations
 
-6. **Result Reranking**
+Stage 2: LLM Reranking
 ```python
 def rerank_results(self, query: str, search_results: Dict[str, Any]) -> List[Dict[str, Any]]:
 ```
-- LLM-based relevance scoring with caching:
-  - Caches scores per query-text pair
-  - Ensures consistent scoring
-  - Only queries LLM for new texts
-- Deterministic ordering:
-  - Primary sort by combined score
-  - Secondary sort by document ID
+- LLM-based relevance scoring:
+  - Prompts LLM to rate each chunk's relevance (0-10)
+  - Considers direct answers (high relevance)
+  - Evaluates related information (medium relevance)
+  - Identifies tangential content (low relevance)
 - Score combination:
-  - Vector similarity (40%)
-  - LLM relevance (60%)
-- Fallback mechanisms for LLM failures
+  - Vector similarity weight: 40%
+  - LLM relevance weight: 60%
+  - Normalized to 0-1 scale
+- Performance optimizations:
+  - Score caching per query-text pair
+  - Only queries LLM for uncached texts
+  - Batch processing of uncached texts
+- Fallback mechanisms:
+  - Uses similarity scores if LLM fails
+  - Handles parsing errors gracefully
+  - Maintains deterministic ordering
 
 7. **Result Structure**
 ```python

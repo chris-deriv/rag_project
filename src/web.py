@@ -46,44 +46,42 @@ def process_document_async(filepath, filename):
         logger.info(f"Starting async processing of {filename}")
         processing_documents[filename] = {'status': 'processing', 'error': None}
         
-        # First process the document to get chunks
+        # Process the document to get chunks and source_name
         chunks = process_document(filepath)
         if not chunks:
             raise Exception("No chunks generated from document")
             
+        # Get the actual source_name from the first chunk
+        actual_source_name = chunks[0].get('source_name', filename)
         logger.info(f"Generated {len(chunks)} chunks from {filename}")
+        logger.info(f"Document source_name from chunks: {actual_source_name}")
         
-        # Add document to vector database
+        # Add document to vector database and get the added document info
         add_document(filepath)
-        logger.info(f"Added {filename} to vector database")
         
-        # Get the document from vector database to index
-        all_docs = vector_db.list_document_names()
+        # Get the document directly using the known source name
+        doc_chunks = vector_db.get_document_chunks(actual_source_name)
+        if not doc_chunks:
+            raise Exception(f"Could not verify document {actual_source_name} in vector database after adding")
         
-        # Try both original filename and potential .docx version for Word documents
-        doc_to_index = next(
-            (doc for doc in all_docs if doc['source_name'] in [
-                filename,
-                # If it's a .doc file, also check for .docx version
-                filename.replace('.doc', '.docx') if filename.endswith('.doc') else None
-            ] if doc['source_name']),
-            None
-        )
+        # Create document info for indexing
+        doc_to_index = {
+            'source_name': actual_source_name,
+            'title': doc_chunks[0].get('title', ''),
+            'chunk_count': len(doc_chunks),
+            'total_chunks': doc_chunks[0].get('total_chunks', len(doc_chunks))
+        }
         
-        if doc_to_index:
-            logger.info(f"Found document in database as: {doc_to_index['source_name']}")
-            # Index the document
-            rag_app.index_documents([doc_to_index])
-            logger.info(f"Successfully indexed {doc_to_index['source_name']}")
-            
-            # Update processing status with the actual filename used
-            processing_documents[filename] = {
-                'status': 'completed',
-                'error': None,
-                'actual_filename': doc_to_index['source_name']
-            }
-        else:
-            raise Exception(f"Could not find {filename} in vector database after adding")
+        # Index the document
+        rag_app.index_documents([doc_to_index])
+        logger.info(f"Successfully indexed {doc_to_index['source_name']}")
+        
+        # Update processing status with success
+        processing_documents[filename] = {
+            'status': 'completed',
+            'error': None,
+            'actual_filename': actual_source_name
+        }
         
         logger.info(f"Completed processing {filename}")
         
@@ -156,16 +154,20 @@ def chat():
     
     try:
         # Extract optional document filters
-        source_name = data.get('source_name')
+        source_names = data.get('source_names', [])  # Now expecting an array
         title = data.get('title')
+        
+        # Log the filters being applied
+        logger.info(f"Query filters - source_names: {source_names}, title: {title}")
         
         response = rag_app.query_documents(
             data['query'],
-            source_name=source_name,
+            source_names=source_names,  # Pass the array directly
             title=title
         )
         return jsonify({'response': response})
     except Exception as e:
+        logger.error(f"Error in chat endpoint: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/documents', methods=['GET'])

@@ -1,7 +1,7 @@
 import chromadb
 from chromadb.config import Settings
 from config.settings import CHROMA_COLLECTION_NAME, CHROMA_PERSIST_DIR
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
 import numpy as np
 import logging
 import os
@@ -39,6 +39,18 @@ class VectorDatabase:
             logger.error(f"Error initializing ChromaDB: {str(e)}")
             raise
 
+    def _get_existing_doc_ids(self, source_name: str) -> List[str]:
+        """Get existing document IDs for a given source name."""
+        try:
+            # Get all documents with matching source name
+            result = self.collection.get(
+                where={"source_name": source_name}
+            )
+            return result.get("ids", [])
+        except Exception as e:
+            logger.error(f"Error getting existing document IDs: {str(e)}")
+            return []
+
     def add_documents(self, documents: List[Dict[str, Any]]) -> None:
         """
         Add documents to the vector database.
@@ -71,21 +83,45 @@ class VectorDatabase:
                 logger.info(f"Chunk Index: {doc.get('chunk_index', 0)}")
                 logger.info(f"Total Chunks: {doc.get('total_chunks', 1)}")
             
-            self.collection.add(
-                embeddings=[doc['embedding'].tolist() for doc in documents],
-                documents=[doc['text'] for doc in documents],
-                metadatas=[{
-                    "text": doc["text"],
-                    "source_name": doc.get("source_name", "Unknown"),
-                    "title": doc.get("title", ""),
-                    "chunk_index": doc.get("chunk_index", 0),
-                    "total_chunks": doc.get("total_chunks", 1),
-                    "section_title": doc.get("section_title", ""),
-                    "section_type": doc.get("section_type", "content")
-                } for doc in documents],
-                ids=[str(doc["id"]) for doc in documents]
-            )
-            logger.info(f"Successfully added {len(documents)} documents")
+            # Group documents by source name
+            docs_by_source = {}
+            for doc in documents:
+                source_name = doc.get('source_name', 'Unknown')
+                if source_name not in docs_by_source:
+                    docs_by_source[source_name] = []
+                docs_by_source[source_name].append(doc)
+            
+            # Process each source's documents
+            for source_name, source_docs in docs_by_source.items():
+                # Get existing document IDs for this source
+                existing_ids = self._get_existing_doc_ids(source_name)
+                
+                if existing_ids:
+                    logger.info(f"Found existing documents for {source_name}, updating...")
+                    # Delete existing documents
+                    self.collection.delete(ids=existing_ids)
+                    logger.info(f"Deleted {len(existing_ids)} existing documents")
+                
+                # Add new documents
+                self.collection.add(
+                    embeddings=[doc['embedding'].tolist() for doc in source_docs],
+                    documents=[doc['text'] for doc in source_docs],
+                    metadatas=[{
+                        "source_name": doc.get("source_name", "Unknown"),
+                        "title": doc.get("title", ""),
+                        "chunk_index": doc.get("chunk_index", 0),
+                        "total_chunks": doc.get("total_chunks", 1),
+                        "section_title": doc.get("section_title", ""),
+                        "section_type": doc.get("section_type", "content"),
+                        "file_type": doc.get("file_type", ""),
+                        "text": doc["text"]  # Include text in metadata for easier retrieval
+                    } for doc in source_docs],
+                    ids=[str(doc["id"]) for doc in source_docs]
+                )
+                logger.info(f"Added {len(source_docs)} documents for {source_name}")
+            
+            logger.info(f"Successfully processed all documents")
+            
         except Exception as e:
             logger.error(f"Error adding documents to vector database: {str(e)}")
             raise
@@ -93,7 +129,7 @@ class VectorDatabase:
     def query(self, 
              query_embedding: np.ndarray, 
              n_results: int = 5,
-             source_name: Optional[str] = None,
+             source_names: Optional[List[str]] = None,
              title: Optional[str] = None) -> Dict[str, Any]:
         """
         Query the vector database for similar documents with optional filtering.
@@ -101,7 +137,7 @@ class VectorDatabase:
         Args:
             query_embedding: The embedding vector of the query (numpy array)
             n_results: Number of results to return (default: 5)
-            source_name: Optional filter by source filename (exact match)
+            source_names: Optional list of source filenames to filter by (exact match)
             title: Optional filter by document title (partial match)
             
         Returns:
@@ -112,8 +148,9 @@ class VectorDatabase:
             where = {}
             where_document = {}
             
-            if source_name:
-                where["source_name"] = source_name
+            if source_names:
+                # Use $in operator to match any of the source names
+                where["source_name"] = {"$in": source_names}
             
             if title:
                 # Use $contains operator for partial title matching
@@ -177,7 +214,9 @@ class VectorDatabase:
                     found_titles.add((title, source_name))
                     matches.append({
                         'title': metadata.get('title', ''),
-                        'source_name': source_name
+                        'source_name': source_name,
+                        'file_type': metadata.get('file_type', ''),
+                        'section_type': metadata.get('section_type', 'content')
                     })
             
             return matches
@@ -262,8 +301,21 @@ class VectorDatabase:
                 
             # Print debug information
             logger.info("\nListing documents from ChromaDB:")
-            all_docs = self.collection.get(include=['metadatas'])
+            
+            # Get all documents with their metadata
+            all_docs = self.collection.get(
+                include=['metadatas', 'documents'],
+                limit=count  # Ensure we get all documents
+            )
             logger.info(f"Total documents found: {len(all_docs['metadatas'])}")
+            
+            # Debug log the first few documents
+            for i in range(min(3, len(all_docs['metadatas']))):
+                logger.info(f"\nDocument {i+1} metadata:")
+                logger.info(f"Source Name: {all_docs['metadatas'][i].get('source_name', 'Unknown')}")
+                logger.info(f"Title: {all_docs['metadatas'][i].get('title', '')}")
+                logger.info(f"Chunk Index: {all_docs['metadatas'][i].get('chunk_index', 0)}")
+                logger.info(f"Total Chunks: {all_docs['metadatas'][i].get('total_chunks', 1)}")
             
             doc_stats = {}
             
@@ -279,6 +331,13 @@ class VectorDatabase:
                     }
                 else:
                     doc_stats[source_name]['chunk_count'] += 1
+            
+            # Debug log the results
+            logger.info("\nDocument statistics:")
+            for doc in doc_stats.values():
+                logger.info(f"\nSource: {doc['source_name']}")
+                logger.info(f"Title: {doc['title']}")
+                logger.info(f"Chunks: {doc['chunk_count']}/{doc['total_chunks']}")
             
             return list(doc_stats.values())
         except Exception as e:
@@ -303,31 +362,30 @@ class VectorDatabase:
             - section_type: Type of section (e.g., 'body', 'heading')
         """
         try:
-            # Check if collection is empty
-            if self.collection.count() == 0:
-                logger.info("ChromaDB collection is empty")
-                return []
-                
             # Get all chunks for the document
-            all_docs = self.collection.get(include=['metadatas', 'documents'])
-            doc_chunks = []
+            result = self.collection.get(
+                where={"source_name": source_name},
+                include=['metadatas', 'documents']
+            )
             
-            # Filter and collect chunks for the specified document
-            for i, metadata in enumerate(all_docs['metadatas']):
-                if metadata.get('source_name') == source_name:
-                    doc_chunks.append({
-                        'id': all_docs['ids'][i],
-                        'text': metadata['text'],
-                        'title': metadata.get('title', ''),
-                        'chunk_index': metadata.get('chunk_index', 0),
-                        'total_chunks': metadata.get('total_chunks', 1),
-                        'section_title': metadata.get('section_title', ''),
-                        'section_type': metadata.get('section_type', 'content')
-                    })
+            if not result['ids']:
+                logger.info(f"No chunks found for document: {source_name}")
+                return []
+            
+            # Convert to list of dictionaries and sort by chunk index
+            chunks = []
+            for i in range(len(result['ids'])):
+                chunk = {
+                    'id': result['ids'][i],
+                    'text': result['documents'][i],
+                    **result['metadatas'][i]
+                }
+                chunks.append(chunk)
             
             # Sort chunks by index
-            doc_chunks.sort(key=lambda x: x['chunk_index'])
-            return doc_chunks
+            chunks.sort(key=lambda x: x.get('chunk_index', 0))
+            return chunks
+            
         except Exception as e:
             logger.error(f"Error getting document chunks: {str(e)}")
             raise
