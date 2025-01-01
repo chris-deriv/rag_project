@@ -5,8 +5,7 @@ import {
   Typography,
   CircularProgress,
   Alert,
-  Paper,
-  LinearProgress
+  Paper
 } from '@mui/material';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import api from '../api';
@@ -110,16 +109,6 @@ const FileUpload = ({ onUploadSuccess }) => {
       setUploading(false);
       setSuccess(false);
     }
-  };
-
-  const getProgressMessage = () => {
-    if (!processingStatus) return 'Initializing...';
-    
-    const { chunk_count, total_chunks } = processingStatus;
-    if (chunk_count === 0) return 'Processing document...';
-    
-    const percent = Math.round((chunk_count / total_chunks) * 100);
-    return `Processing chunks: ${chunk_count} / ${total_chunks} (${percent}%)`;
   };
 
   return (

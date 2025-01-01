@@ -15,7 +15,6 @@ import {
   IconButton,
   InputAdornment
 } from '@mui/material';
-import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import ClearIcon from '@mui/icons-material/Clear';
 import api from '../api';
