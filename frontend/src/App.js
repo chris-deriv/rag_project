@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import api from './api';
 import { Container, Grid, Paper, Box, Button, Dialog, DialogTitle, DialogContent, DialogActions, Typography } from '@mui/material';
 import FileUpload from './components/FileUpload';
@@ -10,6 +10,40 @@ function App() {
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [resetting, setResetting] = useState(false);
+  const [processingDocument, setProcessingDocument] = useState(false);
+
+  // Track document processing status
+  useEffect(() => {
+    let pollInterval;
+    const checkProcessingStatus = async () => {
+      try {
+        const docs = await api.getDocumentNames();
+        const hasProcessing = docs.some(doc => doc.status === 'processing');
+        setProcessingDocument(hasProcessing);
+        
+        if (!hasProcessing && pollInterval) {
+          clearInterval(pollInterval);
+          pollInterval = null;
+        }
+      } catch (err) {
+        console.error('Error checking processing status:', err);
+      }
+    };
+
+    // Initial check
+    checkProcessingStatus();
+
+    // Start polling if not already polling
+    if (!pollInterval) {
+      pollInterval = setInterval(checkProcessingStatus, 2000);
+    }
+
+    return () => {
+      if (pollInterval) {
+        clearInterval(pollInterval);
+      }
+    };
+  }, [refreshTrigger]);
 
   const handleReset = async () => {
     setConfirmOpen(false);
@@ -32,8 +66,24 @@ function App() {
   };
 
   // Handle document list updates from FileUpload
+  const handleUploadStart = () => {
+    setRefreshTrigger(prev => prev + 1);
+  };
+
   const handleUploadSuccess = () => {
-    setRefreshTrigger(prev => prev + 1); // Only increment refresh trigger
+    setRefreshTrigger(prev => prev + 1);
+  };
+
+  const handleUploadError = async (filename) => {
+    try {
+      // Remove the failed document from the backend
+      await api.deleteDocument(filename);
+    } catch (err) {
+      console.error('Error cleaning up failed document:', err);
+    } finally {
+      // Refresh the document list to remove the failed document from UI
+      setRefreshTrigger(prev => prev + 1);
+    }
   };
 
   return (
@@ -64,7 +114,12 @@ function App() {
             <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
               {/* Main Content */}
               <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', gap: 3 }}>
-                <FileUpload onUploadSuccess={handleUploadSuccess} />
+                <FileUpload 
+                  onUploadStart={handleUploadStart}
+                  onUploadSuccess={handleUploadSuccess}
+                  onUploadError={handleUploadError}
+                  isProcessing={processingDocument}
+                />
                 <DocumentSearch
                   onDocumentsSelect={setSelectedDocuments}
                   selectedDocuments={selectedDocuments}

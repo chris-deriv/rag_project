@@ -55,6 +55,12 @@ const api = {
   resetDatabase: async () => {
     const response = await axios.delete(`${API_BASE_URL}/reset`);
     return response.data;
+  },
+
+  // Delete a document
+  deleteDocument: async (filename) => {
+    const response = await axios.delete(`${API_BASE_URL}/document/${filename}`);
+    return response.data;
   }
 };
 

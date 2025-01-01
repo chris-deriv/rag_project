@@ -10,11 +10,10 @@ import {
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import api from '../api';
 
-const FileUpload = ({ onUploadSuccess }) => {
+const FileUpload = ({ onUploadSuccess, onUploadStart, onUploadError, isProcessing }) => {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(false);
-  const [currentFile, setCurrentFile] = useState(null);
   const [pollingCount, setPollingCount] = useState(0);
   const [processingStatus, setProcessingStatus] = useState(null);
   const MAX_POLLING_COUNT = 300; // 10 minutes max (300 * 2 seconds)
@@ -26,21 +25,27 @@ const FileUpload = ({ onUploadSuccess }) => {
     setUploading(true);
     setError(null);
     setSuccess(false);
-    setCurrentFile(null);
     setPollingCount(0);
     setProcessingStatus(null);
 
     try {
       // Upload the file
       const response = await api.uploadDocument(file);
-      setCurrentFile(response.filename);
+      const filename = response.filename;
+      
+      // Notify parent that upload has started
+      if (onUploadStart) {
+        onUploadStart();
+      }
       
       // Start polling for status
-      pollUploadStatus(response.filename);
+      pollUploadStatus(filename);
       
     } catch (err) {
-      setError(err.response?.data?.error || 'Error uploading file');
+      const errorMessage = err.response?.data?.error || 'Error uploading file';
+      setError(errorMessage);
       setUploading(false);
+      // Don't call onUploadError here since the file wasn't created yet
     }
     // Reset file input
     event.target.value = '';
@@ -48,9 +53,13 @@ const FileUpload = ({ onUploadSuccess }) => {
 
   const pollUploadStatus = async (filename) => {
     if (pollingCount >= MAX_POLLING_COUNT) {
-      setError('Document processing timed out');
+      const timeoutError = 'Document processing timed out';
+      setError(timeoutError);
       setUploading(false);
       setSuccess(false);
+      if (onUploadError) {
+        onUploadError(filename);
+      }
       return;
     }
 
@@ -69,9 +78,13 @@ const FileUpload = ({ onUploadSuccess }) => {
           break;
           
         case 'error':
-          setError(status.error || 'Error processing document');
+          const errorMessage = status.error || 'Error processing document';
+          setError(errorMessage);
           setUploading(false);
           setSuccess(false);
+          if (onUploadError) {
+            onUploadError(filename);
+          }
           break;
           
         case 'processing':
@@ -81,9 +94,13 @@ const FileUpload = ({ onUploadSuccess }) => {
           break;
           
         default:
-          setError('Unknown processing status');
+          const unknownError = 'Unknown processing status';
+          setError(unknownError);
           setUploading(false);
           setSuccess(false);
+          if (onUploadError) {
+            onUploadError(filename);
+          }
       }
     } catch (err) {
       if (err.response?.status === 404) {
@@ -105,9 +122,13 @@ const FileUpload = ({ onUploadSuccess }) => {
         }
       }
       
-      setError('Error checking upload status');
+      const statusError = 'Error checking upload status';
+      setError(statusError);
       setUploading(false);
       setSuccess(false);
+      if (onUploadError) {
+        onUploadError(filename);
+      }
     }
   };
 
@@ -131,17 +152,17 @@ const FileUpload = ({ onUploadSuccess }) => {
           id="file-upload"
           type="file"
           onChange={handleFileChange}
-          disabled={uploading}
+          disabled={uploading || isProcessing}
         />
 
         <label htmlFor="file-upload">
           <Button
             variant="contained"
             component="span"
-            startIcon={<CloudUploadIcon />}
-            disabled={uploading}
+            startIcon={uploading || isProcessing ? <CircularProgress size={20} /> : <CloudUploadIcon />}
+            disabled={uploading || isProcessing}
           >
-            Choose File
+            {uploading ? 'Uploading...' : isProcessing ? 'Processing Document...' : 'Choose File'}
           </Button>
         </label>
 
@@ -154,6 +175,12 @@ const FileUpload = ({ onUploadSuccess }) => {
         {success && !uploading && !error && (
           <Alert severity="success" sx={{ width: '100%' }}>
             Document processed successfully!
+          </Alert>
+        )}
+
+        {processingStatus && processingStatus.status === 'processing' && (
+          <Alert severity="info" sx={{ width: '100%' }}>
+            Processing document... {processingStatus.progress || ''}
           </Alert>
         )}
       </Box>

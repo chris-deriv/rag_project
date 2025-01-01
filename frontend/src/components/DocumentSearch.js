@@ -44,7 +44,12 @@ const DocumentSearch = ({ onDocumentsSelect, selectedDocuments, refreshTrigger =
             try {
               const updatedDocs = await api.getDocumentNames();
               cachedDocs.current = updatedDocs;
-              setDocuments(updatedDocs);
+              // Only show processing documents if there's no search query
+              if (searchQuery.trim()) {
+                setDocuments(updatedDocs.filter(doc => doc.status === 'completed'));
+              } else {
+                setDocuments(updatedDocs);
+              }
               
               // Stop polling if no more processing documents
               if (!updatedDocs.some(doc => doc.status === 'processing')) {
@@ -73,7 +78,7 @@ const DocumentSearch = ({ onDocumentsSelect, selectedDocuments, refreshTrigger =
         clearInterval(pollInterval);
       }
     };
-  }, [refreshTrigger]);
+  }, [refreshTrigger, searchQuery]);
 
   // Handle search
   useEffect(() => {
@@ -88,16 +93,19 @@ const DocumentSearch = ({ onDocumentsSelect, selectedDocuments, refreshTrigger =
         setLoading(true);
         const results = await api.searchTitles(searchQuery);
         // Merge search results with cached document status
-        const mergedResults = results.map(result => {
-          const cachedDoc = cachedDocs.current.find(doc => doc.source_name === result.source_name);
-          return {
-            ...result,
-            status: cachedDoc?.status || 'completed',
-            chunk_count: cachedDoc?.chunk_count || 0,
-            total_chunks: cachedDoc?.total_chunks || 0,
-            error: cachedDoc?.error
-          };
-        });
+        // Only include completed documents in search results
+        const mergedResults = results
+          .map(result => {
+            const cachedDoc = cachedDocs.current.find(doc => doc.source_name === result.source_name);
+            return {
+              ...result,
+              status: cachedDoc?.status || 'completed',
+              chunk_count: cachedDoc?.chunk_count || 0,
+              total_chunks: cachedDoc?.total_chunks || 0,
+              error: cachedDoc?.error
+            };
+          })
+          .filter(doc => doc.status === 'completed'); // Only show completed documents in search results
         setDocuments(mergedResults);
       } catch (err) {
         setError('Error searching documents');
