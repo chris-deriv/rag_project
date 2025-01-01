@@ -231,7 +231,11 @@ class DocumentStore:
             # Update state with chunk information
             state.chunk_count = len(chunks)
             state.total_chunks = len(chunks)
-            state.source_name = chunks[0].metadata.get('source_name', filename)
+            # Use original filename (not the converted one) as source name
+            state.source_name = filename
+            # Update metadata to use original filename
+            for chunk in chunks:
+                chunk.metadata['source_name'] = filename
             self._update_processing_state(filename, state)
             
             # 2. Generate embeddings (single point of embedding generation)

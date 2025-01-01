@@ -46,7 +46,10 @@ class VectorDatabase:
             result = self.collection.get(
                 where={"source_name": source_name}
             )
-            return result.get("ids", [])
+            ids = result.get("ids", [])
+            logger.info(f"Found {len(ids)} existing documents for {source_name}")
+            logger.info(f"Document IDs: {ids}")
+            return ids
         except Exception as e:
             logger.error(f"Error getting existing document IDs: {str(e)}")
             return []
@@ -99,7 +102,21 @@ class VectorDatabase:
                 if existing_ids:
                     logger.info(f"Found existing documents for {source_name}, updating...")
                     # Delete existing documents
-                    self.collection.delete(ids=existing_ids)
+                    logger.info(f"Attempting to delete documents with IDs: {existing_ids}")
+                    try:
+                        self.collection.delete(ids=existing_ids)
+                        # Verify deletion
+                        remaining = self.collection.get(
+                            where={"source_name": source_name}
+                        )
+                        if remaining.get("ids"):
+                            logger.warning(f"Deletion may have failed. Found {len(remaining['ids'])} remaining documents")
+                            logger.warning(f"Remaining IDs: {remaining['ids']}")
+                        else:
+                            logger.info("Deletion verified - no remaining documents found")
+                    except Exception as e:
+                        logger.error(f"Error during deletion: {str(e)}")
+                        raise
                     logger.info(f"Deleted {len(existing_ids)} existing documents")
                 
                 # Add new documents
