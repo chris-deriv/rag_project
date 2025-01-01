@@ -138,10 +138,10 @@ const FileUpload = ({ onUploadSuccess }) => {
           <Button
             variant="contained"
             component="span"
-            startIcon={uploading ? <CircularProgress size={20} /> : <CloudUploadIcon />}
+            startIcon={<CloudUploadIcon />}
             disabled={uploading}
           >
-            {uploading ? 'Processing Document (this may take several minutes)...' : 'Choose File'}
+            Choose File
           </Button>
         </label>
 
@@ -155,15 +155,6 @@ const FileUpload = ({ onUploadSuccess }) => {
           <Alert severity="success" sx={{ width: '100%' }}>
             Document processed successfully!
           </Alert>
-        )}
-
-        {uploading && currentFile && (
-          <Box sx={{ width: '100%', display: 'flex', alignItems: 'center', gap: 2 }}>
-            <CircularProgress size={20} />
-            <Typography variant="body2" color="textSecondary">
-              Processing {currentFile}...
-            </Typography>
-          </Box>
         )}
       </Box>
     </Paper>
