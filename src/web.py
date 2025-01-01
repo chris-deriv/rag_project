@@ -46,7 +46,7 @@ def process_document_async(filepath, filename):
         logger.info(f"Starting async processing of {filename}")
         processing_documents[filename] = {'status': 'processing', 'error': None}
         
-        # Process the document to get chunks and source_name
+        # Process the document to get chunks
         chunks = process_document(filepath)
         if not chunks:
             raise Exception("No chunks generated from document")
@@ -56,8 +56,25 @@ def process_document_async(filepath, filename):
         logger.info(f"Generated {len(chunks)} chunks from {filename}")
         logger.info(f"Document source_name from chunks: {actual_source_name}")
         
-        # Add document to vector database and get the added document info
-        add_document(filepath)
+        # Generate embeddings and add to vector database
+        texts = [chunk['text'] for chunk in chunks]
+        embeddings = document_store.embedding_generator.generate_embeddings(texts)
+        
+        # Convert chunks to the format expected by VectorDatabase
+        documents = []
+        for i, chunk in enumerate(chunks):
+            doc = {
+                "id": chunk['id'],
+                "text": chunk['text'],
+                "embedding": embeddings[i],
+                **{k: v for k, v in chunk.items() if k not in ['id', 'text']}
+            }
+            documents.append(doc)
+        
+        # Add documents with embeddings to ChromaDB
+        logger.info("Adding documents to ChromaDB...")
+        vector_db.add_documents(documents)
+        logger.info("Documents added successfully")
         
         # Get the document directly using the known source name
         doc_chunks = vector_db.get_document_chunks(actual_source_name)

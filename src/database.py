@@ -122,6 +122,12 @@ class VectorDatabase:
             
             logger.info(f"Successfully processed all documents")
             
+            # Debug: List all documents after adding
+            all_docs = self.collection.get(include=['metadatas'])
+            logger.info("\nAll documents in collection after adding:")
+            for metadata in all_docs['metadatas']:
+                logger.info(f"Source Name: {metadata.get('source_name')}")
+            
         except Exception as e:
             logger.error(f"Error adding documents to vector database: {str(e)}")
             raise
@@ -362,11 +368,22 @@ class VectorDatabase:
             - section_type: Type of section (e.g., 'body', 'heading')
         """
         try:
+            logger.info(f"\nQuerying for document chunks with source_name: {source_name}")
+            
+            # Get all documents first to debug
+            all_docs = self.collection.get(include=['metadatas'])
+            logger.info("\nAll documents in collection:")
+            for metadata in all_docs['metadatas']:
+                logger.info(f"Source Name: {metadata.get('source_name')}")
+            
             # Get all chunks for the document
             result = self.collection.get(
                 where={"source_name": source_name},
                 include=['metadatas', 'documents']
             )
+            
+            logger.info(f"Query result IDs: {result['ids']}")
+            logger.info(f"Query result metadatas: {result['metadatas']}")
             
             if not result['ids']:
                 logger.info(f"No chunks found for document: {source_name}")
