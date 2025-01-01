@@ -32,19 +32,28 @@ def mock_get_documents():
         yield mock_get
 
 @pytest.fixture
-def mock_process_document():
-    with patch('src.web.process_document') as mock_process:
-        mock_process.return_value = [{
-            'id': 1,
+def mock_document_store():
+    with patch('src.web.document_store') as mock_store:
+        # Create a mock ProcessingState
+        mock_state = Mock()
+        mock_state.status = 'completed'
+        mock_state.error = None
+        mock_state.source_name = 'test.pdf'
+        mock_state.chunk_count = 5
+        mock_state.total_chunks = 5
+        
+        # Configure mock store
+        mock_store.process_and_store_document.return_value = mock_state
+        mock_store.get_processing_state.return_value = mock_state
+        mock_store.get_document_info.return_value = {
             'source_name': 'test.pdf',
             'title': 'Test Document',
-            'text': 'Test content',
-            'chunk_index': 0,
-            'total_chunks': 1
-        }]
-        yield mock_process
+            'chunk_count': 5,
+            'total_chunks': 5
+        }
+        yield mock_store
 
-def test_upload_file_success(client, mock_process_document, mock_add_document, mock_get_documents):
+def test_upload_file_success(client, mock_document_store, mock_rag_app):
     """Test successful file upload and processing."""
     # Create a mock file
     file_content = b'Test PDF content'
@@ -63,51 +72,64 @@ def test_upload_file_success(client, mock_process_document, mock_add_document, m
     assert data['message'] == 'File upload started'
     assert data['filename'] == 'test.pdf'
 
-def test_upload_status_success(client, mock_process_document, mock_add_document):
+def test_upload_status_success(client, mock_document_store):
     """Test upload status endpoint for successful processing."""
-    # Create a mock file and upload it
-    file = (io.BytesIO(b'Test PDF content'), 'test.pdf')
-    response = client.post(
-        '/upload',
-        data={'file': file},
-        content_type='multipart/form-data'
-    )
+    # Configure mock state
+    mock_state = Mock()
+    mock_state.status = 'completed'
+    mock_state.error = None
+    mock_state.source_name = 'test.pdf'
+    mock_state.chunk_count = 5
+    mock_state.total_chunks = 5
+    mock_document_store.get_processing_state.return_value = mock_state
     
-    # Wait a moment for async processing
-    import time
-    time.sleep(0.1)
-    
-    # Check status - should show completed
+    # Check status
     response = client.get('/upload-status/test.pdf')
     assert response.status_code == 200
     data = json.loads(response.data)
     assert data['status'] == 'completed'
     assert data.get('error') is None
+    assert data['source_name'] == 'test.pdf'
+    assert data['chunk_count'] == 5
+    assert data['total_chunks'] == 5
 
-def test_upload_status_error(client, mock_process_document):
+def test_upload_status_error(client, mock_document_store):
     """Test upload status endpoint for failed processing."""
-    # Mock processing error
-    mock_process_document.side_effect = Exception('Processing error')
+    # Configure mock state with error
+    mock_state = Mock()
+    mock_state.status = 'error'
+    mock_state.error = 'Processing error'
+    mock_state.source_name = 'test.pdf'
+    mock_state.chunk_count = 0
+    mock_state.total_chunks = 0
+    mock_document_store.get_processing_state.return_value = mock_state
     
-    # Create a mock file and upload it
-    file = (io.BytesIO(b'Test PDF content'), 'test.pdf')
-    response = client.post(
-        '/upload',
-        data={'file': file},
-        content_type='multipart/form-data'
-    )
-    
-    # Wait a moment for async processing
-    import time
-    time.sleep(0.1)
-    
-    # Check status - should show error
+    # Check status
     response = client.get('/upload-status/test.pdf')
     assert response.status_code == 200
     data = json.loads(response.data)
     assert data['status'] == 'error'
-    assert 'error' in data
-    assert 'Processing error' in data['error']
+    assert data['error'] == 'Processing error'
+    assert data['chunk_count'] == 0
+
+def test_upload_status_processing(client, mock_document_store):
+    """Test upload status endpoint for document still processing."""
+    # Configure mock state for processing
+    mock_state = Mock()
+    mock_state.status = 'processing'
+    mock_state.error = None
+    mock_state.source_name = 'test.pdf'
+    mock_state.chunk_count = 2
+    mock_state.total_chunks = 5
+    mock_document_store.get_processing_state.return_value = mock_state
+    
+    # Check status
+    response = client.get('/upload-status/test.pdf')
+    assert response.status_code == 200
+    data = json.loads(response.data)
+    assert data['status'] == 'processing'
+    assert data['chunk_count'] == 2
+    assert data['total_chunks'] == 5
 
 def test_upload_status_unknown_file(client):
     """Test upload status endpoint for unknown file."""

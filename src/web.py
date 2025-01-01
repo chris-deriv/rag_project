@@ -4,7 +4,7 @@ import os
 import logging
 from werkzeug.utils import secure_filename
 from src.app import RAGApplication
-from src.documents import add_document, get_documents, process_document, document_store
+from src.documents import get_documents, process_document, document_store, get_processing_state
 from src.database import VectorDatabase
 import threading
 
@@ -37,76 +37,27 @@ def allowed_file(filename):
 rag_app = RAGApplication()
 vector_db = document_store.db  # Use the same instance from DocumentStore
 
-# Track processing documents
-processing_documents = {}
-
 def process_document_async(filepath, filename):
-    """Process document asynchronously and update processing status."""
+    """Process document asynchronously using the centralized document store."""
     try:
         logger.info(f"Starting async processing of {filename}")
-        processing_documents[filename] = {'status': 'processing', 'error': None}
         
-        # Process the document to get chunks
-        chunks = process_document(filepath)
-        if not chunks:
-            raise Exception("No chunks generated from document")
-            
-        # Get the actual source_name from the first chunk
-        actual_source_name = chunks[0].get('source_name', filename)
-        logger.info(f"Generated {len(chunks)} chunks from {filename}")
-        logger.info(f"Document source_name from chunks: {actual_source_name}")
+        # Process and store document using centralized store
+        state = document_store.process_and_store_document(filepath)
         
-        # Generate embeddings and add to vector database
-        texts = [chunk['text'] for chunk in chunks]
-        embeddings = document_store.embedding_generator.generate_embeddings(texts)
-        
-        # Convert chunks to the format expected by VectorDatabase
-        documents = []
-        for i, chunk in enumerate(chunks):
-            doc = {
-                "id": chunk['id'],
-                "text": chunk['text'],
-                "embedding": embeddings[i],
-                **{k: v for k, v in chunk.items() if k not in ['id', 'text']}
-            }
-            documents.append(doc)
-        
-        # Add documents with embeddings to ChromaDB
-        logger.info("Adding documents to ChromaDB...")
-        vector_db.add_documents(documents)
-        logger.info("Documents added successfully")
-        
-        # Get the document directly using the known source name
-        doc_chunks = vector_db.get_document_chunks(actual_source_name)
-        if not doc_chunks:
-            raise Exception(f"Could not verify document {actual_source_name} in vector database after adding")
-        
-        # Create document info for indexing
-        doc_to_index = {
-            'source_name': actual_source_name,
-            'title': doc_chunks[0].get('title', ''),
-            'chunk_count': len(doc_chunks),
-            'total_chunks': doc_chunks[0].get('total_chunks', len(doc_chunks))
-        }
-        
-        # Index the document
-        rag_app.index_documents([doc_to_index])
-        logger.info(f"Successfully indexed {doc_to_index['source_name']}")
-        
-        # Update processing status with success
-        processing_documents[filename] = {
-            'status': 'completed',
-            'error': None,
-            'actual_filename': actual_source_name
-        }
+        if state.status == 'completed':
+            # Get document info for indexing
+            doc_info = document_store.get_document_info(state.source_name)
+            if doc_info:
+                # Index the document
+                rag_app.index_documents([doc_info])
+                logger.info(f"Successfully indexed {doc_info['source_name']}")
         
         logger.info(f"Completed processing {filename}")
         
     except Exception as e:
-        error_msg = str(e)
-        logger.error(f"Error processing {filename}: {error_msg}")
-        processing_documents[filename] = {'status': 'error', 'error': error_msg}
-    
+        logger.error(f"Error processing {filename}: {str(e)}")
+        
     finally:
         # Clean up the uploaded file
         if os.path.exists(filepath):
@@ -158,10 +109,18 @@ def upload_file():
 @app.route('/upload-status/<filename>', methods=['GET'])
 def get_upload_status(filename):
     """Get the processing status of an uploaded document."""
-    if filename not in processing_documents:
+    state = document_store.get_processing_state(filename)
+    if not state:
         return jsonify({'status': 'unknown'}), 404
     
-    return jsonify(processing_documents[filename])
+    response = {
+        'status': state.status,
+        'error': state.error,
+        'source_name': state.source_name,
+        'chunk_count': state.chunk_count,
+        'total_chunks': state.total_chunks
+    }
+    return jsonify(response)
 
 @app.route('/chat', methods=['POST'])
 def chat():
@@ -244,31 +203,30 @@ def list_document_names():
         for doc in documents:
             filename = doc['source_name']
             # Check both original filename and .doc version
-            doc_status = None
-            if filename in processing_documents:
-                doc_status = processing_documents[filename]
-            elif filename.replace('.docx', '.doc') in processing_documents:
-                doc_status = processing_documents[filename.replace('.docx', '.doc')]
+            state = get_processing_state(filename) or get_processing_state(filename.replace('.docx', '.doc'))
             
-            if doc_status:
-                doc['status'] = doc_status['status']
-                if doc_status.get('error'):
-                    doc['error'] = doc_status['error']
+            if state:
+                doc['status'] = state.status
+                if state.error:
+                    doc['error'] = state.error
+                doc['chunk_count'] = state.chunk_count
+                doc['total_chunks'] = state.total_chunks
             else:
                 doc['status'] = 'completed'
         
         # Add any documents that are still processing but not yet in vector database
-        for filename, status in processing_documents.items():
-            if status['status'] == 'processing' and not any(
+        for filename in [f for f in os.listdir(app.config['UPLOAD_FOLDER']) if allowed_file(f)]:
+            state = get_processing_state(filename)
+            if state and state.status == 'processing' and not any(
                 d['source_name'] in [filename, filename.replace('.doc', '.docx')] 
                 for d in documents
             ):
                 documents.append({
                     'source_name': filename,
                     'title': filename,
-                    'chunk_count': 0,
-                    'total_chunks': 0,
-                    'status': 'processing'
+                    'chunk_count': state.chunk_count,
+                    'total_chunks': state.total_chunks,
+                    'status': state.status
                 })
         
         return jsonify(documents)
@@ -308,8 +266,10 @@ def reset_database():
     """Reset the vector database by deleting all documents."""
     try:
         vector_db.delete_collection()
-        # Clear processing documents tracking
-        processing_documents.clear()
+        # Clear processing states
+        for filename in os.listdir(app.config['UPLOAD_FOLDER']):
+            if allowed_file(filename):
+                os.remove(os.path.join(app.config['UPLOAD_FOLDER'], filename))
         return jsonify({'message': 'Database reset successfully'}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500

@@ -41,32 +41,64 @@ class TestRAGApplication(unittest.TestCase):
         self.assertEqual(sorted1[1]["text"], "text2")  # doc1, title1, index 1
         self.assertEqual(sorted1[2]["text"], "text3")  # doc2, title2, index 1
 
-    @patch('src.embedding.EmbeddingGenerator.generate_embeddings')
-    def test_index_documents_ordering(self, mock_generate_embeddings):
-        """Test document indexing maintains deterministic order."""
-        # Setup mock embeddings
-        mock_generate_embeddings.return_value = np.array([[0.1, 0.2, 0.3]])
-
+    def test_index_documents_verification(self):
+        """Test document indexing verifies documents in vector database."""
         documents = [
             {
-                "id": "2",
-                "text": "text2",
-                "source_file": "doc2"
+                "source_name": "doc1.pdf",
+                "title": "Document 1"
             },
             {
-                "id": "1",
-                "text": "text1",
-                "source_file": "doc1"
+                "source_name": "doc2.pdf",
+                "title": "Document 2"
             }
         ]
 
-        with patch.object(self.app.vector_db, 'add_documents') as mock_add:
+        # Mock document_store responses
+        mock_doc_info = {
+            'source_name': 'doc1.pdf',
+            'title': 'Document 1',
+            'chunk_count': 5,
+            'total_chunks': 5
+        }
+
+        with patch('src.documents.document_store.get_document_info', return_value=mock_doc_info) as mock_get_info:
             self.app.index_documents(documents)
             
-            # Verify documents were sorted by ID before adding to database
-            added_docs = mock_add.call_args[0][0]
-            self.assertEqual(added_docs[0]['id'], "1")
-            self.assertEqual(added_docs[1]['id'], "2")
+            # Verify document info was checked for each document
+            self.assertEqual(mock_get_info.call_count, 2)
+            mock_get_info.assert_any_call('doc1.pdf')
+            mock_get_info.assert_any_call('doc2.pdf')
+
+    def test_index_documents_missing_source_name(self):
+        """Test indexing handles documents without source_name."""
+        documents = [
+            {
+                "title": "Document 1"
+            }
+        ]
+
+        with patch('src.documents.document_store.get_document_info') as mock_get_info:
+            self.app.index_documents(documents)
+            
+            # Verify no document info check was attempted
+            mock_get_info.assert_not_called()
+
+    def test_index_documents_not_found(self):
+        """Test indexing handles documents not found in vector database."""
+        documents = [
+            {
+                "source_name": "doc1.pdf",
+                "title": "Document 1"
+            }
+        ]
+
+        # Mock document_store to return None (document not found)
+        with patch('src.documents.document_store.get_document_info', return_value=None) as mock_get_info:
+            self.app.index_documents(documents)
+            
+            # Verify document info was checked
+            mock_get_info.assert_called_once_with('doc1.pdf')
 
     @patch('src.embedding.EmbeddingGenerator.generate_embeddings')
     def test_query_documents_deterministic(self, mock_generate_embeddings):
@@ -203,14 +235,11 @@ class TestRAGApplication(unittest.TestCase):
 
     def test_error_handling(self):
         """Test error handling in main operations."""
-        # Test indexing error
-        with patch('src.embedding.EmbeddingGenerator.generate_embeddings', side_effect=Exception("Embedding error")):
-            with self.assertRaises(Exception) as context:
-                self.app.index_documents([{"id": "1", "text": "test"}])
-            self.assertIn("Embedding error", str(context.exception))
+        # Test indexing error with invalid document
+        self.app.index_documents([{"id": "1", "text": "test"}])  # Should log warning and skip
 
         # Test query error
-        with patch('src.embedding.EmbeddingGenerator.generate_embeddings', side_effect=Exception("Query error")):
+        with patch('src.search.SearchEngine.search', side_effect=Exception("Query error")):
             with self.assertRaises(Exception) as context:
                 self.app.query_documents("test query")
             self.assertIn("Query error", str(context.exception))

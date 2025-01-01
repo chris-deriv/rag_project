@@ -57,6 +57,9 @@ ENV TRANSFORMERS_CACHE=/app/cache/huggingface \
 # Copy application code
 COPY --chown=appuser:appuser . .
 
+# Pre-download the model during build
+RUN python -c "from sentence_transformers import SentenceTransformer; model = SentenceTransformer('all-MiniLM-L6-v2')"
+
 EXPOSE 5000
 
 ENTRYPOINT ["docker-entrypoint.sh"]

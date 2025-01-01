@@ -41,7 +41,55 @@
 
 ## Logic and Implementation Analysis
 
-### Strengths
+### Core Logic Issues
+
+#### 1. Document Processing Flow
+```
+Current Flow:
+Upload -> Async Process -> Generate Chunks -> Generate Embeddings -> Add to DB -> Index
+
+Problems:
+a. Double Processing:
+- web.py generates embeddings and adds to DB
+- app.py's index_documents also generates embeddings and adds to DB
+- This could lead to duplicate entries or race conditions
+
+b. Document State Management:
+- No atomic transaction for document updates
+- If processing fails midway, partial document chunks might remain in DB
+```
+
+#### 2. Query Flow Issues
+```
+Current Flow:
+Query -> Search Engine -> Get Chunks -> Generate Response
+
+Problems:
+a. Consistency:
+- No check if all chunks of a document are present before querying
+- Could return incomplete context if document is partially processed
+
+b. Filter Validation:
+- source_names filter doesn't verify if documents exist
+- Could return empty results without proper error message
+```
+
+#### 3. Database Operations Issues
+```
+Current Flow:
+Add Documents -> Delete Existing -> Add New
+
+Problems:
+a. Race Conditions:
+- Delete and add operations aren't atomic
+- Could lose data if another operation happens between delete and add
+
+b. Consistency:
+- No verification that all chunks are added successfully
+- No rollback if add operation fails partially
+```
+
+### Implementation Strengths
 
 #### 1. Robust Error Handling
 - Comprehensive try-except blocks
@@ -58,7 +106,7 @@
 - Proper handling of filters
 - Efficient reranking implementation
 
-### Critical Issues and Gaps
+### Additional Issues
 
 #### 1. Scalability Concerns
 - No clear strategy for handling large document sets

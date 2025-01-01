@@ -7,9 +7,11 @@ import {
   Box,
   CircularProgress,
   Stack,
-  Chip
+  Chip,
+  Alert
 } from '@mui/material';
 import SendIcon from '@mui/icons-material/Send';
+import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import api from '../api';
 
 const ChatInterface = ({ selectedDocuments, onDocumentDelete }) => {
@@ -45,13 +47,29 @@ const ChatInterface = ({ selectedDocuments, onDocumentDelete }) => {
       // Add assistant message
       setMessages(prev => [...prev, { type: 'assistant', content: result.response }]);
     } catch (err) {
-      setError(err.response?.data?.error || 'Error getting response');
+      const errorMessage = err.response?.data?.error || 'Error getting response';
+      setError(errorMessage);
       // Add error message
-      setMessages(prev => [...prev, { type: 'error', content: err.response?.data?.error || 'Error getting response' }]);
+      setMessages(prev => [...prev, { 
+        type: 'error', 
+        content: errorMessage,
+        details: err.response?.data?.details
+      }]);
     } finally {
       setLoading(false);
       setQuery('');
     }
+  };
+
+  const getNoDocumentsMessage = () => {
+    if (selectedDocuments.length === 0) {
+      return (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          Please select one or more completed documents to start chatting
+        </Alert>
+      );
+    }
+    return null;
   };
 
   return (
@@ -59,6 +77,8 @@ const ChatInterface = ({ selectedDocuments, onDocumentDelete }) => {
       <Typography variant="h6" component="h2" gutterBottom>
         Chat
       </Typography>
+
+      {getNoDocumentsMessage()}
 
       {selectedDocuments && selectedDocuments.length > 0 && (
         <Box mb={2}>
@@ -70,6 +90,7 @@ const ChatInterface = ({ selectedDocuments, onDocumentDelete }) => {
                 color="primary"
                 variant="outlined"
                 onDelete={() => onDocumentDelete(doc)}
+                icon={<CheckCircleOutlineIcon />}
               />
             ))}
           </Stack>
@@ -104,10 +125,18 @@ const ChatInterface = ({ selectedDocuments, onDocumentDelete }) => {
                 maxWidth: '80%',
                 p: 2,
                 borderRadius: 2,
-                bgcolor: message.type === 'user' ? 'primary.main' : 'background.paper',
-                color: message.type === 'user' ? 'primary.contrastText' : 'text.primary',
+                bgcolor: message.type === 'user' 
+                  ? 'primary.main' 
+                  : message.type === 'error' 
+                    ? 'error.light'
+                    : 'background.paper',
+                color: message.type === 'user' 
+                  ? 'primary.contrastText' 
+                  : message.type === 'error'
+                    ? 'error.contrastText'
+                    : 'text.primary',
                 border: message.type !== 'user' ? '1px solid' : 'none',
-                borderColor: 'divider'
+                borderColor: message.type === 'error' ? 'error.main' : 'divider'
               }}
             >
               <Typography
@@ -117,6 +146,15 @@ const ChatInterface = ({ selectedDocuments, onDocumentDelete }) => {
               >
                 {message.content}
               </Typography>
+              {message.details && (
+                <Typography
+                  variant="caption"
+                  color="error"
+                  sx={{ mt: 1, display: 'block' }}
+                >
+                  {message.details}
+                </Typography>
+              )}
             </Box>
           </Box>
         ))}
@@ -128,11 +166,13 @@ const ChatInterface = ({ selectedDocuments, onDocumentDelete }) => {
         <Box sx={{ display: 'flex', gap: 1 }}>
           <TextField
             fullWidth
-            placeholder="Type your message..."
+            placeholder={selectedDocuments.length === 0 
+              ? "Select documents to start chatting..." 
+              : "Type your message..."}
             variant="outlined"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            disabled={loading}
+            disabled={loading || selectedDocuments.length === 0}
             size="small"
           />
           <Button

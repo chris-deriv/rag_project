@@ -24,9 +24,11 @@ class RAGApplication:
     def index_documents(self, documents: List[Dict[str, Any]]) -> None:
         """
         Index a list of documents into the vector database.
+        This method now handles only metadata indexing, as document processing
+        is managed by the DocumentStore.
         
         Args:
-            documents: List of dictionaries containing document information
+            documents: List of dictionaries containing document metadata
         """
         try:
             if not documents:
@@ -35,51 +37,25 @@ class RAGApplication:
                 
             logger.info(f"Indexing {len(documents)} documents...")
             
-            # Generate embeddings for all documents
-            processed_docs = []
+            # Verify each document exists in the vector database
             for doc in documents:
-                # Skip if document is empty or invalid
                 if not isinstance(doc, dict):
-                    logger.warning(f"Skipping invalid document: {doc}")
-                    continue
-                    
-                if 'text' not in doc:
-                    logger.warning(f"Skipping document without text: {doc}")
+                    logger.warning(f"Skipping invalid document metadata: {doc}")
                     continue
                 
-                # Extract metadata
-                metadata = {k: v for k, v in doc.items() if k not in ['id', 'text', 'embedding']}
-                source_name = metadata.get('source_name', metadata.get('source_file', 'Unknown'))
-                title = metadata.get('title', '')
-                chunk_index = metadata.get('chunk_index', 0)
-                total_chunks = metadata.get('total_chunks', 1)
+                source_name = doc.get('source_name')
+                if not source_name:
+                    logger.warning("Skipping document without source_name")
+                    continue
                 
-                logger.info(f"Processing document: {source_name}")
-                logger.info(f"Title: {title}")
-                logger.info(f"Chunk: {chunk_index + 1}/{total_chunks}")
+                # Verify document exists in vector database
+                doc_info = document_store.get_document_info(source_name)
+                if not doc_info:
+                    logger.warning(f"Document {source_name} not found in vector database")
+                    continue
                 
-                # Create processed document with metadata
-                processed_doc = {
-                    'id': doc.get('id', len(processed_docs) + 1),
-                    'text': doc['text'],
-                    'embedding': self.embedder.generate_embeddings([doc['text']])[0],
-                    'source_name': source_name,
-                    'title': title,
-                    'chunk_index': chunk_index,
-                    'total_chunks': total_chunks
-                }
-                processed_docs.append(processed_doc)
-            
-            # Sort processed documents by ID for deterministic ordering
-            processed_docs.sort(key=lambda x: x['id'])
-            
-            # Add documents to vector database
-            if processed_docs:
-                logger.info(f"Adding {len(processed_docs)} documents to vector database")
-                self.vector_db.add_documents(processed_docs)
-                logger.info("Documents indexed successfully")
-            else:
-                logger.warning("No valid documents to index")
+                logger.info(f"Verified document {source_name} in vector database")
+                logger.info(f"Chunks: {doc_info['chunk_count']}/{doc_info['total_chunks']}")
             
         except Exception as e:
             logger.error(f"Error indexing documents: {str(e)}")

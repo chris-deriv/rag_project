@@ -1,7 +1,7 @@
 """Document processing for the RAG application with advanced chunking strategies."""
 import os
 import uuid
-from typing import List, Dict, Optional, BinaryIO, Union
+from typing import List, Dict, Optional, BinaryIO, Union, Any
 from dataclasses import dataclass
 import re
 from pypdf import PdfReader
@@ -25,9 +25,18 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 @dataclass
+class ProcessingState:
+    """Tracks the state of document processing."""
+    status: str  # 'processing', 'completed', 'error'
+    error: Optional[str] = None
+    source_name: Optional[str] = None
+    chunk_count: int = 0
+    total_chunks: int = 0
+
+@dataclass
 class DocumentChunk:
     """Represents a chunk of text from a document with metadata."""
-    id: str  # Changed from int to str for UUID-based IDs
+    id: str
     text: str
     metadata: Dict
 
@@ -46,513 +55,290 @@ class DocumentProcessor:
         
         # Initialize text splitter with better separators
         self.text_splitter = RecursiveCharacterTextSplitter(
-            separators=[
-                "\n\n",  # Paragraph breaks
-                "\n",    # Line breaks
-                ".",     # Sentence breaks
-                "!",     # Exclamation marks
-                "?",     # Question marks
-                ";",     # Semicolons
-                ":",     # Colons
-                " ",     # Words
-                ""       # Characters
-            ],
+            separators=["\n\n", "\n", ".", "!", "?", ";", ":", " ", ""],
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
             length_function=self._get_length_function(),
             is_separator_regex=False
         )
-    
-    def _get_length_function(self):
+
+    def _get_length_function(self) -> callable:
         """Get the appropriate length function based on settings."""
         if self.length_function == "token":
             return lambda x: len(self.tokenizer.encode(x))
         return len
     
-    def _clean_text(self, text: str) -> str:
-        """Clean and preprocess text."""
-        from ftfy import fix_text
-        text = fix_text(text)
-        
-        # Split into lines and process each line
-        lines = []
-        for line in text.split('\n'):
-            line = line.strip()
-            if not line:
-                continue
-            if line.endswith('-'):
-                line = line[:-1]
-            lines.append(line)
-        
-        # Join lines and normalize whitespace
-        text = ' '.join(lines)
-        text = re.sub(r'\s+([.,!?;:])', r'\1', text)
-        text = ' '.join(text.split())
-        
-        return text.strip()
-
-    def _clean_title(self, title: str) -> str:
-        """Clean and normalize document title."""
-        if not title:
-            return ""
-        
-        # Convert to string if not already
-        title = str(title)
-        
-        # Fix encoding issues
-        from ftfy import fix_text
-        title = fix_text(title)
-        
-        # Remove extra spaces, including within words
-        title = re.sub(r'\s+', ' ', title)  # Normalize all whitespace to single space
-        title = re.sub(r'(?<=\w)\s+(?=\w)', '', title)  # Remove spaces between parts of words
-        title = title.strip()
-        
-        return title
-    
-    def _get_base_metadata(self, file_path: str, title: Optional[str] = None) -> Dict[str, str]:
-        """Get base metadata for a document."""
-        # Get filename and extension
-        filename = os.path.basename(file_path)
-        file_ext = os.path.splitext(filename)[1].lower()[1:]  # Remove the dot
-        
-        # If no title provided, use filename without extension
-        if not title:
-            title = os.path.splitext(filename)[0]
-        
-        return {
-            'source_name': filename,
-            'file_type': file_ext,
-            'title': title,
-            'section_type': 'content'  # Default section type
-        }
-    
-    def _generate_chunk_id(self, source_name: str, chunk_index: int) -> str:
-        """Generate a unique ID for a chunk that includes the source name."""
-        # Create a deterministic but unique ID based on source name and chunk index
-        unique_id = f"{source_name}_{chunk_index}"
-        # Use UUID5 with a namespace UUID to generate a consistent hash
-        namespace_uuid = uuid.UUID('6ba7b810-9dad-11d1-80b4-00c04fd430c8')  # UUID namespace for URLs
-        return str(uuid.uuid5(namespace_uuid, unique_id))
-    
-    def _extract_pdf_text(self, file_path: str) -> List[Dict[str, str]]:
-        """Extract text from PDF with metadata."""
-        result = []
-        
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore")
+    def process_document(self, file_path: str) -> List[DocumentChunk]:
+        """Process a document file into chunks with metadata."""
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"File not found: {file_path}")
             
-            try:
-                reader = PdfReader(file_path, strict=False)
-                
-                # Extract document title from metadata
-                title = None
-                if hasattr(reader, 'metadata') and reader.metadata and '/Title' in reader.metadata:
-                    title = reader.metadata['/Title']
-                    if isinstance(title, bytes):
-                        title = title.decode('utf-8', errors='ignore')
-                    title = self._clean_title(title)
-                
-                # Get base metadata with title if found
-                base_metadata = self._get_base_metadata(file_path, title)
-                logger.info(f"PDF metadata: {base_metadata}")
-                
-                # Process each page
-                for i, page in enumerate(reader.pages):
-                    try:
-                        text = page.extract_text()
-                        cleaned_text = self._clean_text(text) if text else ""
-                        if not cleaned_text:
-                            continue
-                        
-                        # Split text into lines and process each line
-                        lines = cleaned_text.split('\n')
-                        sections = []
-                        current_section = {"text": [], "title": "", "type": "content"}
-                        
-                        for line in lines:
-                            line = line.strip()
-                            if not line:
-                                continue
-                            
-                            # Check if this is a section header
-                            is_header = (
-                                re.match(r'^(?:(?:\d+\.)*\d+\s+|\bSection\s+\d+:|\bChapter\s+\d+:?|\b(?:Introduction|Abstract|Conclusion|Summary|Background|Methods|Results|Discussion)\b)', line, re.IGNORECASE) or
-                                (len(line) < 100 and  # Not too long
-                                 re.match(r'^[A-Z]', line) and  # Starts with capital letter
-                                 not re.search(r'[.!?]$', line) and  # No sentence endings
-                                 not re.match(r'^(?:(?:The|A|An|This|That|These|Those)\s+)', line))  # Not starting with articles
-                            )
-                            
-                            if is_header:
-                                # Save previous section if it has content
-                                if current_section["text"]:
-                                    section_metadata = base_metadata.copy()
-                                    section_metadata.update({
-                                        'section_type': current_section["type"],
-                                        'section_title': current_section["title"],
-                                        'page_number': i + 1,
-                                        'page_size': page.mediabox.upper_right if hasattr(page, 'mediabox') else (0, 0),
-                                        'rotation': page.rotation if hasattr(page, 'rotation') else 0
-                                    })
-                                    sections.append({
-                                        'text': ' '.join(current_section["text"]),
-                                        'metadata': section_metadata
-                                    })
-                                
-                                # Start new section
-                                current_section = {
-                                    "text": [],
-                                    "title": line,
-                                    "type": "heading"
-                                }
-                            else:
-                                current_section["text"].append(line)
-                        
-                        # Add final section
-                        if current_section["text"]:
-                            section_metadata = base_metadata.copy()
-                            section_metadata.update({
-                                'section_type': current_section["type"],
-                                'section_title': current_section["title"],
-                                'page_number': i + 1,
-                                'page_size': page.mediabox.upper_right if hasattr(page, 'mediabox') else (0, 0),
-                                'rotation': page.rotation if hasattr(page, 'rotation') else 0
-                            })
-                            sections.append({
-                                'text': ' '.join(current_section["text"]),
-                                'metadata': section_metadata
-                            })
-                        
-                        # Add all sections from this page
-                        result.extend(sections)
-                        
-                    except Exception as e:
-                        logger.warning(f"Error processing page {i+1}: {str(e)}")
-                        continue
-                
-                # If no sections were created (empty PDF), create one with empty text
-                if not result:
-                    result.append({
-                        'text': '',
-                        'metadata': {
-                            **base_metadata,
-                            'section_type': 'content',
-                            'section_title': '',
-                            'page_number': 1,
-                            'page_size': (0, 0),
-                            'rotation': 0
-                        }
-                    })
-                
-                return result
-                
-            except Exception as e:
-                logger.error(f"Error processing PDF {file_path}: {str(e)}")
-                return []
-    
-    def _extract_docx_text(self, file_path: str) -> List[Dict[str, str]]:
-        """Extract text from DOCX/DOC with metadata and structure."""
-        sections = []
-        converted_file = None
-        
-        try:
-            # If it's a .doc file, convert to .docx first
-            if file_path.lower().endswith('.doc'):
-                converted_file = self._convert_doc_to_docx(file_path)
-                file_path = converted_file
-                logger.info(f"Converted .doc to .docx: {file_path}")
-            
-            doc = Document(file_path)
-            
-            # Extract document title from core properties
-            title = None
-            if hasattr(doc, 'core_properties') and doc.core_properties:
-                title = doc.core_properties.title
-                if title:
-                    title = self._clean_title(title)
-            
-            # Get base metadata
-            base_metadata = self._get_base_metadata(file_path, title)
-            
-            # Create at least one section even if there's no content
-            current_section = {'text': [], 'metadata': base_metadata}
-            
-            for paragraph in doc.paragraphs:
-                # Skip empty paragraphs
-                if not paragraph.text.strip():
-                    continue
-                
-                # Detect headers/titles based on style
-                if paragraph.style.name.startswith(('Heading', 'Title')):
-                    # Save previous section if it has content
-                    if current_section['text']:
-                        sections.append({
-                            'text': ' '.join(current_section['text']),
-                            'metadata': current_section['metadata'].copy()
-                        })
-                    
-                    # Start new section
-                    section_metadata = base_metadata.copy()
-                    section_metadata.update({
-                        'section_type': paragraph.style.name,
-                        'section_title': paragraph.text,
-                        'heading_level': int(paragraph.style.name[-1]) 
-                        if paragraph.style.name.startswith('Heading') 
-                        else 0
-                    })
-                    
-                    current_section = {
-                        'text': [paragraph.text],
-                        'metadata': section_metadata
-                    }
-                else:
-                    # Clean and add paragraph text
-                    cleaned_text = self._clean_text(paragraph.text)
-                    if cleaned_text:
-                        current_section['text'].append(cleaned_text)
-            
-            # Add final section or empty section if no content
-            if current_section['text']:
-                sections.append({
-                    'text': ' '.join(current_section['text']),
-                    'metadata': current_section['metadata']
-                })
-            else:
-                # Add empty section to preserve document metadata
-                sections.append({
-                    'text': '',
-                    'metadata': current_section['metadata']
-                })
-            
-            return sections
-            
-        except Exception as e:
-            logger.error(f"Error processing Word document {file_path}: {str(e)}")
-            raise ValueError(f"Error processing Word document: {str(e)}")
-        finally:
-            # Clean up temporary file if it was created
-            if converted_file:
-                try:
-                    os.remove(converted_file)
-                except:
-                    pass
-    
-    def process_document(self, file_or_path: Union[str, BinaryIO]) -> List[DocumentChunk]:
-        """Process a document and return chunks with metadata."""
-        if isinstance(file_or_path, str):
-            file_ext = os.path.splitext(file_or_path)[1].lower()
-            file_name = os.path.basename(file_or_path)
-        else:
-            raise ValueError("File objects not supported - save to disk first")
-        
-        logger.info(f"\n{'='*80}\nProcessing document: {file_name}\n{'='*80}")
-        
-        # Extract text based on file type
+        file_ext = os.path.splitext(file_path)[1].lower()
         if file_ext == '.pdf':
-            sections = self._extract_pdf_text(file_or_path)
-        elif file_ext in ['.docx', '.doc']:
-            sections = self._extract_docx_text(file_or_path)
+            sections = self._extract_pdf_text(file_path)
+        elif file_ext in ['.doc', '.docx']:
+            sections = self._extract_docx_text(file_path)
         else:
             raise ValueError(f"Unsupported file type: {file_ext}")
-        
-        # Process each section into chunks
+            
         chunks = []
-        current_chunk = 0
-        
-        logger.info(f"\nFound {len(sections)} sections to process")
-        
-        # Handle empty documents
-        if not sections:
-            logger.warning("No sections found in document")
-            base_metadata = self._get_base_metadata(file_name)
-            chunks.append(DocumentChunk(
-                id=self._generate_chunk_id(file_name, 0),
-                text="",
-                metadata={
-                    **base_metadata,
-                    'chunk_size': 0,
-                    'token_count': 0,
-                    'chunk_index': 0,
-                    'total_chunks': 1
-                }
-            ))
-            return chunks
-        
-        # Calculate total chunks for non-empty documents
-        total_chunks = 0
         for section in sections:
-            text = section['text']
-            if text:
-                section_chunks = self.text_splitter.split_text(text)
-                total_chunks += len(section_chunks)
-                logger.info(f"Section will generate {len(section_chunks)} chunks")
-            else:
-                total_chunks += 1
-        
-        logger.info(f"Total chunks to be created: {total_chunks}")
-        
-        for section_idx, section in enumerate(sections, 1):
-            text = section['text']
-            base_metadata = section['metadata']
+            chunk = DocumentChunk(
+                id=str(uuid.uuid4()),
+                text=section['text'],
+                metadata=section['metadata']
+            )
+            chunks.append(chunk)
             
-            logger.info(f"\n{'-'*80}\nProcessing Section {section_idx}/{len(sections)}")
-            logger.info(f"Section Title: {base_metadata.get('section_title', 'Untitled')}")
-            logger.info(f"Section Type: {base_metadata.get('section_type', 'Unknown')}")
-            logger.info(f"Section Text Length: {len(text)}")
-            
-            if not text:
-                logger.info("Empty section, creating empty chunk")
-                chunks.append(DocumentChunk(
-                    id=self._generate_chunk_id(file_name, current_chunk),
-                    text="",
-                    metadata={
-                        **base_metadata,
-                        'chunk_size': 0,
-                        'token_count': 0,
-                        'chunk_index': current_chunk,
-                        'total_chunks': total_chunks
-                    }
-                ))
-                current_chunk += 1
-                continue
-            
-            # Split text into chunks
-            text_chunks = self.text_splitter.split_text(text)
-            logger.info(f"Generated {len(text_chunks)} chunks from section")
-            
-            # Create chunk objects
-            for chunk_idx, chunk_text in enumerate(text_chunks, 1):
-                chunk_text = chunk_text.strip()
-                if chunk_text:
-                    # Remove leading punctuation
-                    chunk_text = re.sub(r'^[.,!?;:]\s*', '', chunk_text)
-                    
-                    chunk = DocumentChunk(
-                        id=self._generate_chunk_id(file_name, current_chunk),
-                        text=chunk_text,
-                        metadata={
-                            **base_metadata,
-                            'chunk_size': len(chunk_text),
-                            'token_count': len(self.tokenizer.encode(chunk_text)),
-                            'chunk_index': current_chunk,
-                            'total_chunks': total_chunks
-                        }
-                    )
-                    chunks.append(chunk)
-                    
-                    # Enhanced chunk logging
-                    logger.info(f"\nChunk {chunk_idx} (Section {section_idx}, Chunk {chunk_idx}):")
-                    logger.info("-" * 40)
-                    logger.info("Content:")
-                    logger.info(f"{chunk_text[:200]}..." if len(chunk_text) > 200 else chunk_text)
-                    logger.info("-" * 40)
-                    logger.info(f"Character Count: {len(chunk_text)}")
-                    logger.info(f"Token Count: {len(self.tokenizer.encode(chunk_text))}")
-                    logger.info("Metadata:")
-                    logger.info(str(chunk.metadata))
-                    logger.info("=" * 40)
-                    
-                    current_chunk += 1
-        
-        logger.info(f"\n{'='*80}")
-        logger.info(f"Document processing complete")
-        logger.info(f"Total sections processed: {len(sections)}")
-        logger.info(f"Total chunks created: {len(chunks)}")
-        
-        if chunks:
-            logger.info(f"Average chunk size: {sum(len(c.text) for c in chunks)/len(chunks):.2f} characters")
-            logger.info(f"Average tokens per chunk: {sum(len(self.tokenizer.encode(c.text)) for c in chunks)/len(chunks):.2f}")
-        else:
-            logger.warning("No chunks created (empty document)")
-            
-        logger.info(f"{'='*80}\n")
-        
         return chunks
+        
+    def _extract_pdf_text(self, file_path: str) -> List[Dict]:
+        """Extract text and metadata from PDF file."""
+        sections = []
+        try:
+            reader = PdfReader(file_path)
+            total_pages = len(reader.pages)
+            
+            for i, page in enumerate(reader.pages):
+                text = page.extract_text()
+                if text.strip():
+                    sections.append({
+                        'text': text,
+                        'metadata': {
+                            'source_name': os.path.basename(file_path),
+                            'title': os.path.splitext(os.path.basename(file_path))[0],
+                            'file_type': 'pdf',
+                            'section_type': 'content',
+                            'chunk_index': i,
+                            'total_chunks': total_pages
+                        }
+                    })
+        except Exception as e:
+            raise ValueError(f"Error processing PDF: {str(e)}")
+            
+        return sections
+        
+    def _extract_docx_text(self, file_path: str) -> List[Dict]:
+        """Extract text and metadata from DOCX file."""
+        sections = []
+        try:
+            if file_path.endswith('.doc'):
+                # Convert DOC to DOCX using LibreOffice
+                # LibreOffice keeps original name but changes extension
+                original_name = os.path.basename(file_path)
+                docx_name = original_name.rsplit('.', 1)[0] + '.docx'
+                docx_path = os.path.join('/app/tmp', docx_name)
+                
+                # Log current state
+                logger.info(f"Starting conversion of {file_path}")
+                logger.info(f"Expected output: {docx_path}")
+                logger.info(f"Current tmp contents: {os.listdir('/app/tmp')}")
+                
+                # Run LibreOffice conversion
+                result = subprocess.run(
+                    ['soffice', '--headless', '--convert-to', 'docx', '--outdir', '/app/tmp', file_path],
+                    capture_output=True,
+                    text=True,
+                    check=True
+                )
+                
+                # Log conversion results
+                logger.info(f"LibreOffice stdout: {result.stdout}")
+                if result.stderr:
+                    logger.warning(f"LibreOffice stderr: {result.stderr}")
+                logger.info(f"Tmp contents after conversion: {os.listdir('/app/tmp')}")
+                
+                # Verify conversion
+                if not os.path.exists(docx_path):
+                    raise ValueError(
+                        f"LibreOffice conversion failed. Expected file not found at {docx_path}. "
+                        f"Directory contents: {os.listdir('/app/tmp')}. "
+                        f"Command output: {result.stdout}. "
+                        f"Error output: {result.stderr}"
+                    )
+                
+                file_path = docx_path
+            
+            doc = Document(file_path)
+            total_paras = len(doc.paragraphs)
+            
+            # Only include non-empty paragraphs and normalize indices
+            non_empty_sections = []
+            for para in doc.paragraphs:
+                text = para.text.strip()
+                if text:
+                    non_empty_sections.append(text)
+            
+            # Create sections with normalized indices
+            total_sections = len(non_empty_sections)
+            for i, text in enumerate(non_empty_sections):
+                sections.append({
+                    'text': text,
+                    'metadata': {
+                        'source_name': os.path.basename(file_path),
+                        'title': os.path.splitext(os.path.basename(file_path))[0],
+                        'file_type': 'docx',
+                        'section_type': 'content',
+                        'chunk_index': i,
+                        'total_chunks': total_sections
+                    }
+                })
+        except Exception as e:
+            raise ValueError(f"Error processing DOCX: {str(e)}")
+            
+        return sections
 
-# Global document store
 class DocumentStore:
-    """Manages document storage and retrieval."""
+    """Manages document storage and retrieval with atomic operations."""
     
     def __init__(self):
         self.processor = DocumentProcessor()
         self.db = VectorDatabase()
         self.embedding_generator = EmbeddingGenerator()
+        self._processing_states = {}  # Track processing states
     
-    def add_document(self, file_path: str) -> None:
-        """Process and add a document to the store."""
+    def get_processing_state(self, filename: str) -> Optional[ProcessingState]:
+        """Get the current processing state for a document."""
+        return self._processing_states.get(filename)
+    
+    def _update_processing_state(self, filename: str, state: ProcessingState) -> None:
+        """Update the processing state for a document."""
+        self._processing_states[filename] = state
+        logger.info(f"Updated processing state for {filename}: {state}")
+    
+    def process_and_store_document(self, file_path: str) -> ProcessingState:
+        """
+        Process and store a document with atomic operations.
+        This is the single point of entry for document processing.
+        
+        Args:
+            file_path: Path to the document file
+            
+        Returns:
+            ProcessingState: Final state of document processing
+        """
+        filename = os.path.basename(file_path)
+        state = ProcessingState(status='processing')
+        self._update_processing_state(filename, state)
+        
         try:
-            logger.info(f"\nAdding document to store: {file_path}")
-            
-            # Process the document into chunks
+            # 1. Process document into chunks
+            logger.info(f"Processing document: {filename}")
             chunks = self.processor.process_document(file_path)
-            logger.info(f"Generated {len(chunks)} chunks")
+            if not chunks:
+                raise ValueError("No chunks generated from document")
             
-            if chunks:
-                logger.info(f"First chunk metadata: {chunks[0].metadata}")
-                logger.info(f"Using source_name: {chunks[0].metadata.get('source_name', 'Unknown')}")
+            # Update state with chunk information
+            state.chunk_count = len(chunks)
+            state.total_chunks = len(chunks)
+            state.source_name = chunks[0].metadata.get('source_name', filename)
+            self._update_processing_state(filename, state)
             
-            # Extract texts for embedding generation
+            # 2. Generate embeddings (single point of embedding generation)
+            logger.info("Generating embeddings...")
             texts = [chunk.text for chunk in chunks]
-            
-            # Generate embeddings for all texts
             embeddings = self.embedding_generator.generate_embeddings(texts)
-            logger.info(f"Generated {len(embeddings)} embeddings")
             
-            # Convert chunks to the format expected by VectorDatabase
+            # 3. Prepare documents for database
             documents = []
             for i, chunk in enumerate(chunks):
                 doc = {
-                    "id": chunk.id,  # Now using UUID-based ID
+                    "id": chunk.id,
                     "text": chunk.text,
                     "embedding": embeddings[i],
                     **chunk.metadata
                 }
                 documents.append(doc)
-                logger.info(f"Chunk {i+1}/{len(chunks)}: ID={doc['id']}, source_name={doc.get('source_name', 'Unknown')}")
             
-            # Add documents with embeddings to ChromaDB
-            logger.info("Adding documents to ChromaDB...")
+            # 4. Delete any existing document with same source name
+            logger.info(f"Checking for existing document: {state.source_name}")
+            existing_chunks = self.db.get_document_chunks(state.source_name)
+            if existing_chunks:
+                logger.info(f"Found existing document with {len(existing_chunks)} chunks. Removing...")
+                # Get existing IDs and delete them
+                existing_ids = [chunk['id'] for chunk in existing_chunks]
+                self.db.collection.delete(ids=existing_ids)
+                logger.info(f"Deleted {len(existing_ids)} existing chunks")
+            
+            # 5. Atomic database operation
+            logger.info("Adding documents to database...")
             self.db.add_documents(documents)
-            logger.info("Documents added successfully")
             
-            # Verify document was added
-            source_name = chunks[0].metadata.get('source_name', 'Unknown')
-            doc_chunks = self.db.get_document_chunks(source_name)
-            if not doc_chunks:
-                raise ValueError(f"Could not find {source_name} in vector database after adding")
-            logger.info(f"Added {source_name} to vector database")
+            # 6. Verify storage and chunk consistency
+            stored_chunks = self.db.get_document_chunks(state.source_name)
+            if not stored_chunks:
+                raise ValueError(f"Storage verification failed - no chunks found for {filename}")
+            
+            if len(stored_chunks) != len(chunks):
+                raise ValueError(
+                    f"Storage verification failed - chunk count mismatch for {filename}. "
+                    f"Expected {len(chunks)}, found {len(stored_chunks)}"
+                )
+            
+            # Verify chunk indices and total_chunks are consistent
+            chunk_indices = sorted(int(chunk.get('chunk_index', -1)) for chunk in stored_chunks)
+            expected_indices = list(range(len(chunks)))
+            if chunk_indices != expected_indices:
+                raise ValueError(
+                    f"Storage verification failed - inconsistent chunk indices for {filename}. "
+                    f"Expected sequential indices 0-{len(chunks)-1}, got {chunk_indices}"
+                )
+            
+            # Verify total_chunks matches actual count
+            for chunk in stored_chunks:
+                if int(chunk.get('total_chunks', 0)) != len(chunks):
+                    raise ValueError(
+                        f"Storage verification failed - total_chunks mismatch for {filename}. "
+                        f"Expected {len(chunks)}, got {chunk.get('total_chunks')}"
+                    )
+            
+            # Update final state
+            state.status = 'completed'
+            self._update_processing_state(filename, state)
+            logger.info(f"Successfully processed and stored {filename}")
+            
+            return state
             
         except Exception as e:
-            logger.error(f"Error adding document: {str(e)}")
+            error_msg = str(e)
+            logger.error(f"Error processing document {filename}: {error_msg}")
+            state.status = 'error'
+            state.error = error_msg
+            self._update_processing_state(filename, state)
             raise
     
     def get_documents(self) -> List[Dict[str, str]]:
         """Return all document chunks."""
-        # Get documents directly from ChromaDB
         return self.db.get_all_documents()
+    
+    def get_document_info(self, source_name: str) -> Optional[Dict[str, Any]]:
+        """Get information about a specific document."""
+        chunks = self.db.get_document_chunks(source_name)
+        if not chunks:
+            return None
+            
+        return {
+            'source_name': source_name,
+            'title': chunks[0].get('title', ''),
+            'chunk_count': len(chunks),
+            'total_chunks': chunks[0].get('total_chunks', len(chunks))
+        }
 
 # Initialize global document store
 document_store = DocumentStore()
 
-# Expose functions that match the original API
-def add_document(file_path: str) -> None:
-    """Add a document to the global store."""
-    document_store.add_document(file_path)
+# Expose simplified API
+def process_document(file_path: str) -> List[Dict[str, str]]:
+    """Process a document and return its chunks."""
+    state = document_store.process_and_store_document(file_path)
+    if state.status == 'error':
+        raise ValueError(f"Document processing failed: {state.error}")
+    return document_store.db.get_document_chunks(state.source_name)
 
 def get_documents() -> List[Dict[str, str]]:
-    """Get all documents from the global store."""
+    """Get all documents from the store."""
     return document_store.get_documents()
 
-def process_document(file_path: str) -> List[Dict[str, str]]:
-    """Process a single document and return its chunks."""
-    processor = DocumentProcessor()
-    chunks = processor.process_document(file_path)
-    return [
-        {
-            "id": chunk.id,
-            "text": chunk.text,
-            **chunk.metadata
-        }
-        for chunk in chunks
-    ]
+def get_processing_state(filename: str) -> Optional[ProcessingState]:
+    """Get processing state for a document."""
+    return document_store.get_processing_state(filename)

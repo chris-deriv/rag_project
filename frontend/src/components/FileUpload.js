@@ -6,24 +6,19 @@ import {
   CircularProgress,
   Alert,
   Paper,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions
+  LinearProgress
 } from '@mui/material';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
-import DeleteIcon from '@mui/icons-material/Delete';
 import api from '../api';
 
 const FileUpload = ({ onUploadSuccess }) => {
   const [uploading, setUploading] = useState(false);
-  const [resetting, setResetting] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(false);
-  const [confirmOpen, setConfirmOpen] = useState(false);
   const [currentFile, setCurrentFile] = useState(null);
   const [pollingCount, setPollingCount] = useState(0);
-  const MAX_POLLING_COUNT = 60; // 2 minutes max (60 * 2 seconds)
+  const [processingStatus, setProcessingStatus] = useState(null);
+  const MAX_POLLING_COUNT = 300; // 10 minutes max (300 * 2 seconds)
 
   const handleFileChange = async (event) => {
     const file = event.target.files[0];
@@ -34,11 +29,11 @@ const FileUpload = ({ onUploadSuccess }) => {
     setSuccess(false);
     setCurrentFile(null);
     setPollingCount(0);
+    setProcessingStatus(null);
 
     try {
       // Upload the file
       const response = await api.uploadDocument(file);
-      setSuccess(true);
       setCurrentFile(response.filename);
       
       // Start polling for status
@@ -56,24 +51,40 @@ const FileUpload = ({ onUploadSuccess }) => {
     if (pollingCount >= MAX_POLLING_COUNT) {
       setError('Document processing timed out');
       setUploading(false);
+      setSuccess(false);
       return;
     }
 
     try {
       const status = await api.getUploadStatus(filename);
+      setProcessingStatus(status);
       
-      if (status.status === 'completed') {
-        setUploading(false);
-        if (onUploadSuccess) {
-          onUploadSuccess(); // Just trigger refresh, no need to pass docs
-        }
-      } else if (status.status === 'error') {
-        setError(status.error || 'Error processing document');
-        setUploading(false);
-      } else if (status.status === 'processing') {
-        // Continue polling
-        setPollingCount(prev => prev + 1);
-        setTimeout(() => pollUploadStatus(filename), 2000);
+      switch (status.status) {
+        case 'completed':
+          setUploading(false);
+          setSuccess(true);
+          setError(null);
+          if (onUploadSuccess) {
+            onUploadSuccess();
+          }
+          break;
+          
+        case 'error':
+          setError(status.error || 'Error processing document');
+          setUploading(false);
+          setSuccess(false);
+          break;
+          
+        case 'processing':
+          // Continue polling
+          setPollingCount(prev => prev + 1);
+          setTimeout(() => pollUploadStatus(filename), 2000);
+          break;
+          
+        default:
+          setError('Unknown processing status');
+          setUploading(false);
+          setSuccess(false);
       }
     } catch (err) {
       if (err.response?.status === 404) {
@@ -83,8 +94,10 @@ const FileUpload = ({ onUploadSuccess }) => {
           const doc = docs.find(d => d.source_name === filename);
           if (doc && doc.chunk_count > 0) {
             setUploading(false);
+            setSuccess(true);
+            setError(null);
             if (onUploadSuccess) {
-              onUploadSuccess(); // Just trigger refresh, no need to pass docs
+              onUploadSuccess();
             }
             return;
           }
@@ -95,24 +108,18 @@ const FileUpload = ({ onUploadSuccess }) => {
       
       setError('Error checking upload status');
       setUploading(false);
+      setSuccess(false);
     }
   };
 
-  const handleReset = async () => {
-    setConfirmOpen(false);
-    setResetting(true);
-    setError(null);
-    try {
-      await api.resetDatabase();
-      setSuccess(true);
-      if (onUploadSuccess) {
-        onUploadSuccess(); // Just trigger refresh, no need to pass docs
-      }
-    } catch (err) {
-      setError(err.response?.data?.error || 'Error resetting database');
-    } finally {
-      setResetting(false);
-    }
+  const getProgressMessage = () => {
+    if (!processingStatus) return 'Initializing...';
+    
+    const { chunk_count, total_chunks } = processingStatus;
+    if (chunk_count === 0) return 'Processing document...';
+    
+    const percent = Math.round((chunk_count / total_chunks) * 100);
+    return `Processing chunks: ${chunk_count} / ${total_chunks} (${percent}%)`;
   };
 
   return (
@@ -125,20 +132,9 @@ const FileUpload = ({ onUploadSuccess }) => {
           gap: 2
         }}
       >
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
-          <Typography variant="h6" component="h2">
-            Upload Document
-          </Typography>
-          <Button
-            variant="contained"
-            color="error"
-            startIcon={resetting ? <CircularProgress size={20} /> : <DeleteIcon />}
-            onClick={() => setConfirmOpen(true)}
-            disabled={uploading || resetting}
-          >
-            Reset Database
-          </Button>
-        </Box>
+        <Typography variant="h6" component="h2" sx={{ alignSelf: 'flex-start' }}>
+          Upload Document
+        </Typography>
 
         <input
           accept=".pdf,.doc,.docx"
@@ -156,7 +152,7 @@ const FileUpload = ({ onUploadSuccess }) => {
             startIcon={uploading ? <CircularProgress size={20} /> : <CloudUploadIcon />}
             disabled={uploading}
           >
-            {uploading ? 'Processing Document...' : 'Choose File'}
+            {uploading ? 'Processing Document (this may take several minutes)...' : 'Choose File'}
           </Button>
         </label>
 
@@ -166,42 +162,21 @@ const FileUpload = ({ onUploadSuccess }) => {
           </Alert>
         )}
 
-        {success && !uploading && (
+        {success && !uploading && !error && (
           <Alert severity="success" sx={{ width: '100%' }}>
-            File uploaded successfully!
+            Document processed successfully!
           </Alert>
         )}
 
-        {uploading && (
-          <Alert severity="info" sx={{ width: '100%' }}>
-            Processing document... This may take a moment.
-            {currentFile && (
-              <Typography variant="caption" display="block">
-                File: {currentFile}
-                {pollingCount > 0 && ` (${Math.round((pollingCount / MAX_POLLING_COUNT) * 100)}%)`}
-              </Typography>
-            )}
-          </Alert>
+        {uploading && currentFile && (
+          <Box sx={{ width: '100%', display: 'flex', alignItems: 'center', gap: 2 }}>
+            <CircularProgress size={20} />
+            <Typography variant="body2" color="textSecondary">
+              Processing {currentFile}...
+            </Typography>
+          </Box>
         )}
       </Box>
-
-      {/* Confirmation Dialog */}
-      <Dialog open={confirmOpen} onClose={() => setConfirmOpen(false)}>
-        <DialogTitle>Confirm Reset</DialogTitle>
-        <DialogContent>
-          Are you sure you want to reset the database? This will delete all uploaded documents and cannot be undone.
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setConfirmOpen(false)}>Cancel</Button>
-          <Button
-            onClick={handleReset}
-            color="error"
-            variant="contained"
-          >
-            Reset
-          </Button>
-        </DialogActions>
-      </Dialog>
     </Paper>
   );
 };

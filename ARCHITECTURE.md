@@ -1,6 +1,82 @@
 # RAG System Architecture
 
-[Previous sections remain the same until Search and Retrieval Architecture...]
+## Document Processing Architecture
+
+The system implements a centralized document processing pipeline with robust state tracking:
+
+1. **Document Store**
+```python
+class DocumentStore:
+    """Manages document storage and retrieval with atomic operations."""
+    def process_and_store_document(self, file_path: str) -> ProcessingState:
+```
+- Single point of responsibility for document processing
+- Atomic operations for document updates
+- Consistent state tracking
+- Centralized embedding generation
+
+2. **Processing State Management**
+```python
+@dataclass
+class ProcessingState:
+    """Tracks the state of document processing."""
+    status: str          # 'processing', 'completed', 'error'
+    error: Optional[str] # Error message if failed
+    source_name: str     # Document identifier
+    chunk_count: int     # Current chunks processed
+    total_chunks: int    # Expected total chunks
+```
+- Real-time processing status
+- Error tracking
+- Progress monitoring
+- Atomic state updates
+
+3. **Document Processing Pipeline**
+```
+Upload -> Process -> Generate Embeddings -> Store -> Verify -> Index
+```
+- Chunking with metadata preservation
+- Single embedding generation point
+- Atomic database operations
+- Storage verification
+- Document indexing
+
+4. **Processing Flow**
+```python
+try:
+    # 1. Process document into chunks
+    chunks = processor.process_document(file_path)
+    
+    # 2. Generate embeddings (single point)
+    texts = [chunk.text for chunk in chunks]
+    embeddings = embedding_generator.generate_embeddings(texts)
+    
+    # 3. Prepare documents with embeddings
+    documents = [
+        {
+            "id": chunk.id,
+            "text": chunk.text,
+            "embedding": embedding,
+            **chunk.metadata
+        }
+        for chunk, embedding in zip(chunks, embeddings)
+    ]
+    
+    # 4. Atomic database operation
+    vector_db.add_documents(documents)
+    
+    # 5. Verify storage
+    stored_chunks = vector_db.get_document_chunks(source_name)
+    if not stored_chunks:
+        raise ValueError("Storage verification failed")
+```
+
+5. **Error Handling**
+- Consistent error states
+- Atomic rollbacks
+- Clean temporary file handling
+- Detailed error logging
+
 
 ## Search and Retrieval Architecture
 
@@ -184,6 +260,26 @@ The system exposes several REST endpoints:
 
 1. **Document Management**
 - `POST /upload` - Upload and process new documents
+  ```python
+  # Response format:
+  {
+      "message": str,            # Upload status message
+      "filename": str            # Original filename
+  }
+  ```
+
+- `GET /upload-status/<filename>` - Get document processing status
+  ```python
+  # Response format:
+  {
+      "status": str,            # 'processing', 'completed', 'error'
+      "error": Optional[str],   # Error message if failed
+      "source_name": str,       # Document identifier
+      "chunk_count": int,       # Current chunks processed
+      "total_chunks": int       # Expected total chunks
+  }
+  ```
+
 - `GET /documents` - Retrieve processed documents
 - `GET /document-names` - List unique documents with statistics
   ```python
@@ -193,10 +289,13 @@ The system exposes several REST endpoints:
           "source_name": str,     # Document name
           "title": str,           # Document title
           "chunk_count": int,     # Number of chunks
-          "total_chunks": int     # Total expected chunks
+          "total_chunks": int,    # Total expected chunks
+          "status": str,          # Processing status
+          "error": Optional[str]  # Error message if failed
       }
   ]
   ```
+
 - `GET /document-chunks/<source_name>` - Get ordered chunks for a document
   ```python
   # Response format:
@@ -206,7 +305,9 @@ The system exposes several REST endpoints:
           "text": str,           # Chunk content
           "title": str,          # Document title
           "chunk_index": int,    # Position in document
-          "total_chunks": int    # Total chunks in document
+          "total_chunks": int,   # Total chunks in document
+          "section_title": str,  # Section heading
+          "section_type": str    # Content type
       }
   ]
   ```

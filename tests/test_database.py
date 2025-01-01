@@ -11,7 +11,7 @@ def test_init(mock_chroma_client):
     mock_client.get_or_create_collection.assert_called_once()
     assert db.collection == mock_collection
 
-def test_add_documents(mock_chroma_client):
+def test_add_documents_with_cleanup(mock_chroma_client):
     """Test adding documents to the database."""
     _, mock_collection = mock_chroma_client
     
@@ -38,16 +38,22 @@ def test_add_documents(mock_chroma_client):
         }
     ]
     
-    # Configure mock to return empty list for existing docs
+    # Configure mock to return existing documents
     mock_collection.get.return_value = {
-        'ids': [],
-        'metadatas': [],
-        'documents': []
+        'ids': ['old1', 'old2'],
+        'metadatas': [
+            {'source_name': 'test1.pdf'},
+            {'source_name': 'test1.pdf'}
+        ],
+        'documents': ['Old doc 1', 'Old doc 2']
     }
     
     db.add_documents(documents)
     
-    # Verify add was called for each source document
+    # Verify delete was called for existing documents
+    mock_collection.delete.assert_called_once_with(ids=['old1', 'old2'])
+    
+    # Verify add was called for new documents
     assert mock_collection.add.call_count == 2
     
     # Verify first call
@@ -63,6 +69,57 @@ def test_add_documents(mock_chroma_client):
     assert second_call['documents'] == ['Test document 2']
     assert second_call['ids'] == ['2']
     assert second_call['metadatas'][0]['source_name'] == 'test2.docx'
+
+def test_add_documents_with_inconsistent_chunks(mock_chroma_client):
+    """Test adding documents with inconsistent chunk counts."""
+    _, mock_collection = mock_chroma_client
+    
+    db = VectorDatabase()
+    
+    # Create documents with inconsistent total_chunks
+    documents = [
+        {
+            'id': 1,
+            'text': 'Test document 1',
+            'embedding': np.array([0.1, 0.2, 0.3]),
+            'source_name': 'test.pdf',
+            'title': 'Test Document',
+            'chunk_index': 0,
+            'total_chunks': 3  # Wrong total
+        },
+        {
+            'id': 2,
+            'text': 'Test document 2',
+            'embedding': np.array([0.4, 0.5, 0.6]),
+            'source_name': 'test.pdf',
+            'title': 'Test Document',
+            'chunk_index': 1,
+            'total_chunks': 2  # Inconsistent with first chunk
+        }
+    ]
+    
+    # Configure mock to return the added documents
+    mock_collection.get.return_value = {
+        'ids': ['1', '2'],
+        'metadatas': [
+            {
+                'source_name': 'test.pdf',
+                'chunk_index': 0,
+                'total_chunks': 3
+            },
+            {
+                'source_name': 'test.pdf',
+                'chunk_index': 1,
+                'total_chunks': 2
+            }
+        ],
+        'documents': ['Test document 1', 'Test document 2']
+    }
+    
+    # Adding documents with inconsistent chunks should raise an error
+    with pytest.raises(ValueError) as exc_info:
+        db.add_documents(documents)
+    assert "total_chunks mismatch" in str(exc_info.value)
 
 def test_query_with_title_filter(mock_chroma_client):
     """Test querying documents with title filter."""
