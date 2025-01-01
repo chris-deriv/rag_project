@@ -1,3 +1,4 @@
+
 import chromadb
 from chromadb.config import Settings
 from config.settings import CHROMA_COLLECTION_NAME, CHROMA_PERSIST_DIR
@@ -43,12 +44,22 @@ class VectorDatabase:
         """Get existing document IDs for a given source name."""
         try:
             # Get all documents with matching source name
+            logger.info(f"\nLooking for existing documents with source_name: {source_name}")
+            
+            # Debug: List all documents first
+            all_docs = self.collection.get(include=['metadatas'])
+            logger.info("All document source names in collection:")
+            for metadata in all_docs['metadatas']:
+                logger.info(f"- {metadata.get('source_name')}")
+            
+            # Get documents matching source name
             result = self.collection.get(
                 where={"source_name": source_name}
             )
             ids = result.get("ids", [])
             logger.info(f"Found {len(ids)} existing documents for {source_name}")
-            logger.info(f"Document IDs: {ids}")
+            if ids:
+                logger.info(f"Document IDs to delete: {ids}")
             return ids
         except Exception as e:
             logger.error(f"Error getting existing document IDs: {str(e)}")
@@ -375,6 +386,7 @@ class VectorDatabase:
             source_name: Name/title of the document to retrieve chunks for
             
         Returns:
+            
             List of chunks with their metadata, ordered by chunk_index:
             - id: Chunk identifier
             - text: Chunk content
@@ -387,20 +399,24 @@ class VectorDatabase:
         try:
             logger.info(f"\nQuerying for document chunks with source_name: {source_name}")
             
-            # Get all documents first to debug
+            # Debug: List all documents and their source names
             all_docs = self.collection.get(include=['metadatas'])
             logger.info("\nAll documents in collection:")
+            source_names = set()
             for metadata in all_docs['metadatas']:
-                logger.info(f"Source Name: {metadata.get('source_name')}")
+                source_name_in_db = metadata.get('source_name')
+                if source_name_in_db not in source_names:
+                    source_names.add(source_name_in_db)
+                    logger.info(f"Found source name in DB: {source_name_in_db}")
             
             # Get all chunks for the document
+            logger.info(f"\nSearching for chunks with source_name: {source_name}")
             result = self.collection.get(
                 where={"source_name": source_name},
                 include=['metadatas', 'documents']
             )
             
-            logger.info(f"Query result IDs: {result['ids']}")
-            logger.info(f"Query result metadatas: {result['metadatas']}")
+            logger.info(f"Found {len(result.get('ids', []))} chunks")
             
             if not result['ids']:
                 logger.info(f"No chunks found for document: {source_name}")
