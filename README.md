@@ -1,14 +1,38 @@
 # RAG-based Document Query System
 
-[Previous sections until Environment Setup remain the same...]
+## Project Structure
+
+```
+/
+├── backend/                 # Backend service
+│   ├── src/                # Source code
+│   ├── tests/              # Test files
+│   ├── config/             # Configuration
+│   ├── requirements.txt    # Python dependencies
+│   ├── Dockerfile         
+│   ├── .env.sample        # Sample env for local development
+│   └── .env.docker.sample # Sample env for Docker
+├── frontend/               # Frontend service
+│   ├── src/               # React source code
+│   ├── public/            # Static files
+│   ├── package.json       # Node dependencies
+│   ├── .env.sample        # Sample env for local development
+│   └── .env.docker.sample # Sample env for Docker
+├── docker-compose.yml     # Docker services configuration
+└── README.md             # Project documentation
+```
+
+## Features
+
+[Previous Features section remains the same...]
 
 ## Environment Setup
 
 The system uses different environment configurations for local development and Docker:
 
 ### Backend Environment
-1. Local Development (.env):
-   - Copy .env.sample to .env
+1. Local Development (backend/.env):
+   - Copy backend/.env.sample to backend/.env
    - Configure with local paths and settings
    - Required variables:
      ```bash
@@ -17,8 +41,8 @@ The system uses different environment configurations for local development and D
      CHROMA_COLLECTION_NAME=your_collection_name
      ```
 
-2. Docker Environment (.env.docker):
-   - Copy .env.docker.sample to .env.docker
+2. Docker Environment (backend/.env.docker):
+   - Copy backend/.env.docker.sample to backend/.env.docker
    - Uses Docker-specific paths and settings
    - Container paths are automatically mounted as volumes
 
@@ -42,28 +66,29 @@ The system uses different environment configurations for local development and D
 ### Local Development
 
 1. Clone the repository
-2. Set up data directories:
+2. Set up backend:
    ```bash
+   cd backend
    ./setup_data_dirs.sh
-   ```
-3. Install backend dependencies:
-   ```bash
    pip install -r requirements.txt
-   ```
-4. Set up environment files:
-   ```bash
    cp .env.sample .env
-   cp frontend/.env.sample frontend/.env
+   # Configure .env with your settings
    ```
-5. Configure your .env files with appropriate values
-6. Run the backend:
-   ```bash
-   python src/app.py
-   ```
-7. Install and run frontend:
+3. Set up frontend:
    ```bash
    cd frontend
    npm install
+   cp .env.sample .env
+   # Configure .env with your settings
+   ```
+4. Run backend:
+   ```bash
+   cd backend
+   python src/app.py
+   ```
+5. Run frontend:
+   ```bash
+   cd frontend
    npm start
    ```
 
@@ -72,8 +97,10 @@ The system uses different environment configurations for local development and D
 1. Clone the repository
 2. Set up environment files:
    ```bash
-   cp .env.docker.sample .env.docker        # Backend Docker environment
-   cp frontend/.env.docker.sample frontend/.env.docker  # Frontend Docker environment
+   # Backend
+   cp backend/.env.docker.sample backend/.env.docker
+   # Frontend
+   cp frontend/.env.docker.sample frontend/.env.docker
    ```
 3. Configure your .env.docker files with appropriate values
 4. Start the application:
@@ -85,4 +112,41 @@ The system uses different environment configurations for local development and D
    docker compose down -v
    ```
 
-[Rest of the file remains the same...]
+## Data Storage
+
+### Local Development
+- Data is stored in backend/data/
+- Cache directories are created by setup_data_dirs.sh
+- Manual cleanup required if needed
+
+### Docker Environment
+- Data is stored in Docker named volumes
+- Volumes are automatically managed by Docker
+- Use `docker compose down -v` to clean up all data
+- Uploads directory is mounted from backend/uploads/
+
+## Development
+
+### Running Tests
+```bash
+# Backend tests
+cd backend
+python -m pytest tests/
+
+# Frontend tests
+cd frontend
+npm test
+```
+
+### Code Formatting
+```bash
+# Backend
+cd backend
+black .
+
+# Frontend
+cd frontend
+npm run format
+```
+
+[Previous API Endpoints section remains the same...]

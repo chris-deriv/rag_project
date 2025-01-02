@@ -1,6 +1,8 @@
 services:
   web:
-    build: .
+    build: 
+      context: ./backend
+      dockerfile: Dockerfile
     ports:
       - "5001:5000"
     volumes:
@@ -9,10 +11,10 @@ services:
       - huggingface_cache:/app/cache/huggingface:rw
       - tiktoken_cache:/app/cache/tiktoken:rw
       - torch_cache:/app/cache/torch:rw
-      - ${PWD}/uploads:/app/uploads:rw  # Use absolute path with PWD
-      - tmp_data:/app/tmp:rw  # Add persistent volume for tmp directory
+      - ${PWD}/backend/uploads:/app/uploads:rw  # Updated path
+      - tmp_data:/app/tmp:rw
     env_file:
-      - .env.docker
+      - ./backend/.env.docker
     environment:
       - FLASK_APP=src.web:app
       - FLASK_ENV=development
@@ -20,7 +22,7 @@ services:
       - TIKTOKEN_CACHE_DIR=/app/cache/tiktoken
       - TORCH_HOME=/app/cache/torch
       - SENTENCE_TRANSFORMERS_HOME=/app/model_cache
-    user: "1000:1000"  # Run as appuser for security (defined in Dockerfile)
+    user: "1000:1000"
     deploy:
       resources:
         limits:
@@ -37,8 +39,8 @@ services:
     volumes:
       - ./frontend:/app
     environment:
-      - REACT_APP_API_URL=http://localhost:5001  # Use localhost since React runs in browser
-      - WATCHPACK_POLLING=true  # Enable hot reloading on Linux
+      - REACT_APP_API_URL=http://localhost:5001
+      - WATCHPACK_POLLING=true
     command: sh -c "npm install && npm start"
     depends_on:
       - web
@@ -54,5 +56,5 @@ volumes:
     driver: local
   torch_cache:
     driver: local
-  tmp_data:  # Add new volume for tmp directory
+  tmp_data:
     driver: local
