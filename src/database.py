@@ -1,4 +1,4 @@
-
+"""Vector database management with ChromaDB."""
 import chromadb
 from chromadb.config import Settings
 from config.settings import CHROMA_COLLECTION_NAME, CHROMA_PERSIST_DIR
@@ -54,7 +54,7 @@ class VectorDatabase:
             
             # Get documents matching source name
             result = self.collection.get(
-                where={"source_name": source_name}
+                where={"source_name": {"$eq": source_name}}
             )
             ids = result.get("ids", [])
             logger.info(f"Found {len(ids)} existing documents for {source_name}")
@@ -65,24 +65,22 @@ class VectorDatabase:
             logger.error(f"Error getting existing document IDs: {str(e)}")
             return []
 
-    def add_documents(self, documents: List[Dict[str, Any]]) -> None:
-        """
-        Add documents to the vector database.
+    def _validate_chunk_consistency(self, documents: List[Dict[str, Any]]) -> None:
+        """Validate that all chunks for a document have consistent total_chunks."""
+        docs_by_source = {}
+        for doc in documents:
+            source_name = doc.get('source_name', 'Unknown')
+            if source_name not in docs_by_source:
+                docs_by_source[source_name] = []
+            docs_by_source[source_name].append(doc)
         
-        Args:
-            documents: List of dictionaries with 'id', 'text', 'embedding', and metadata keys.
-                Each document should have:
-                - id: Unique identifier for the document
-                - text: The document text
-                - embedding: The pre-computed embedding vector (numpy array)
-                - source_name: Name/title of the source document
-                - title: Document title
-                - chunk_index: Index of this chunk in the document
-                - total_chunks: Total number of chunks in the document
-                - metadata: Additional metadata
-                - section_title: Title of the document section
-                - section_type: Type of section (e.g., 'body', 'heading')
-        """
+        for source_name, source_docs in docs_by_source.items():
+            total_chunks = source_docs[0].get('total_chunks')
+            if not all(doc.get('total_chunks') == total_chunks for doc in source_docs):
+                raise ValueError(f"Inconsistent total_chunks values for document {source_name}")
+
+    def add_documents(self, documents: List[Dict[str, Any]]) -> None:
+        """Add documents to the vector database."""
         try:
             if not documents:
                 logger.warning("No documents to add")
@@ -96,6 +94,9 @@ class VectorDatabase:
                 logger.info(f"Title: {doc.get('title', '')}")
                 logger.info(f"Chunk Index: {doc.get('chunk_index', 0)}")
                 logger.info(f"Total Chunks: {doc.get('total_chunks', 1)}")
+            
+            # Validate chunk consistency before proceeding
+            self._validate_chunk_consistency(documents)
             
             # Group documents by source name
             docs_by_source = {}
@@ -118,7 +119,7 @@ class VectorDatabase:
                         self.collection.delete(ids=existing_ids)
                         # Verify deletion
                         remaining = self.collection.get(
-                            where={"source_name": source_name}
+                            where={"source_name": {"$eq": source_name}}
                         )
                         if remaining.get("ids"):
                             logger.warning(f"Deletion may have failed. Found {len(remaining['ids'])} remaining documents")
@@ -165,30 +166,23 @@ class VectorDatabase:
              n_results: int = 5,
              source_names: Optional[List[str]] = None,
              title: Optional[str] = None) -> Dict[str, Any]:
-        """
-        Query the vector database for similar documents with optional filtering.
-        
-        Args:
-            query_embedding: The embedding vector of the query (numpy array)
-            n_results: Number of results to return (default: 5)
-            source_names: Optional list of source filenames to filter by (exact match)
-            title: Optional filter by document title (partial match)
-            
-        Returns:
-            Dict containing query results with ids, distances, and metadatas
-        """
+        """Query the vector database for similar documents with optional filtering."""
         try:
             # Build where clause for filtering
-            where = {}
-            where_document = {}
+            where = None
             
-            if source_names:
-                # Use $in operator to match any of the source names
-                where["source_name"] = {"$in": source_names}
-            
-            if title:
-                # Use $contains operator for partial title matching
-                where["title"] = {"$contains": title.lower()}
+            if source_names and title:
+                # Use $and operator to combine source_names and title filters
+                where = {
+                    "$and": [
+                        {"source_name": {"$in": source_names}},
+                        {"title": {"$eq": title.lower()}}
+                    ]
+                }
+            elif source_names:
+                where = {"source_name": {"$in": source_names}}
+            elif title:
+                where = {"title": {"$eq": title.lower()}}
             
             # Execute query with filters if any are specified
             if where:
@@ -210,15 +204,7 @@ class VectorDatabase:
             raise
 
     def search_titles(self, title_query: str) -> List[Dict[str, Any]]:
-        """
-        Search for documents with similar titles.
-        
-        Args:
-            title_query: Partial title to search for
-            
-        Returns:
-            List of documents with matching titles
-        """
+        """Search for documents with similar titles."""
         try:
             # Return empty list for empty queries
             if not title_query.strip():
@@ -259,15 +245,7 @@ class VectorDatabase:
             raise
 
     def get_metadata(self) -> Dict[str, Any]:
-        """
-        Get metadata about the collection.
-        
-        Returns:
-            Dict containing collection metadata including:
-            - name: Collection name
-            - count: Number of documents in collection
-            - metadata: Collection metadata
-        """
+        """Get metadata about the collection."""
         try:
             count = self.collection.count()
             metadata = {
@@ -281,12 +259,7 @@ class VectorDatabase:
             raise
 
     def get_all_documents(self) -> List[Dict[str, Any]]:
-        """
-        Get all documents and their metadata from the collection.
-        
-        Returns:
-            List of documents with their ids, embeddings, and metadata
-        """
+        """Get all documents and their metadata from the collection."""
         try:
             # Check if collection is empty
             count = self.collection.count()
@@ -316,16 +289,7 @@ class VectorDatabase:
             raise
 
     def list_document_names(self) -> List[Dict[str, Any]]:
-        """
-        Get a list of unique document names/titles with their chunk counts.
-        
-        Returns:
-            List of dictionaries containing:
-            - source_name: Name/title of the document
-            - title: Document title
-            - chunk_count: Number of chunks for this document
-            - total_chunks: Total expected chunks
-        """
+        """Get a list of unique document names/titles with their chunk counts."""
         try:
             # Check if collection is empty
             count = self.collection.count()
@@ -379,23 +343,7 @@ class VectorDatabase:
             raise
 
     def get_document_chunks(self, source_name: str) -> List[Dict[str, Any]]:
-        """
-        Get all chunks for a specific document, ordered by chunk index.
-        
-        Args:
-            source_name: Name/title of the document to retrieve chunks for
-            
-        Returns:
-            
-            List of chunks with their metadata, ordered by chunk_index:
-            - id: Chunk identifier
-            - text: Chunk content
-            - title: Document title
-            - chunk_index: Position in document
-            - total_chunks: Total chunks in document
-            - section_title: Title of the document section
-            - section_type: Type of section (e.g., 'body', 'heading')
-        """
+        """Get all chunks for a specific document, ordered by chunk index."""
         try:
             logger.info(f"\nQuerying for document chunks with source_name: {source_name}")
             
@@ -412,7 +360,7 @@ class VectorDatabase:
             # Get all chunks for the document
             logger.info(f"\nSearching for chunks with source_name: {source_name}")
             result = self.collection.get(
-                where={"source_name": source_name},
+                where={"source_name": {"$eq": source_name}},
                 include=['metadatas', 'documents']
             )
             
