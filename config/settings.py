@@ -33,12 +33,12 @@ def get_env_bool(key: str, default: Optional[bool] = None) -> bool:
 # OpenAI API settings
 OPENAI_API_KEY = get_env_str("OPENAI_API_KEY")
 OPENAI_MODEL = get_env_str("OPENAI_MODEL", "gpt-3.5-turbo")
-OPENAI_TEMPERATURE = get_env_float("OPENAI_TEMPERATURE", 0.3)
-OPENAI_MAX_TOKENS = get_env_int("OPENAI_MAX_TOKENS", 1000)
+OPENAI_TEMPERATURE = get_env_float("DEFAULT_TEMPERATURE", 0.3)
+OPENAI_MAX_TOKENS = get_env_int("DEFAULT_MAX_TOKENS", 1000)
 
 # Document processing settings
-CHUNK_SIZE = get_env_int("CHUNK_SIZE", 500)
-CHUNK_OVERLAP = get_env_int("CHUNK_OVERLAP", 50)
+CHUNK_SIZE = get_env_int("DEFAULT_CHUNK_SIZE", 500)
+CHUNK_OVERLAP = get_env_int("DEFAULT_CHUNK_OVERLAP", 50)
 
 # Response settings
 SYSTEM_PROMPT = get_env_str(
@@ -52,7 +52,7 @@ SOURCE_CITATION_PROMPT = get_env_str(
 
 # Cache settings
 RESPONSE_CACHE_SIZE = get_env_int("RESPONSE_CACHE_SIZE", 1000)
-CACHE_ENABLED = get_env_bool("CACHE_ENABLED", True)
+CACHE_ENABLED = get_env_bool("RESPONSE_CACHE_ENABLED", True)
 
 # Database settings
 CHROMA_COLLECTION_NAME = get_env_str("CHROMA_COLLECTION_NAME", "documents")
