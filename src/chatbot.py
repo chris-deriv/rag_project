@@ -87,12 +87,32 @@ class Chatbot:
 
     def _format_contexts_for_cache(self, contexts: List[dict]) -> str:
         """Format contexts list into a deterministic string for caching."""
-        # Sort contexts by text to ensure consistent ordering
-        sorted_contexts = sorted(contexts, key=lambda x: x['text'])
-        return "\n\n".join([
-            f"Source {i+1}:\n{ctx['text']}"
-            for i, ctx in enumerate(sorted_contexts)
-        ])
+        # Group contexts by source
+        contexts_by_source = {}
+        for ctx in contexts:
+            source = ctx.get('source', 'Unknown')
+            if source not in contexts_by_source:
+                contexts_by_source[source] = []
+            contexts_by_source[source].append(ctx)
+        
+        # Sort sources and their contexts
+        formatted_parts = []
+        for source in sorted(contexts_by_source.keys()):
+            source_contexts = contexts_by_source[source]
+            # Sort contexts within each source by chunk index
+            source_contexts.sort(key=lambda x: x.get('chunk_index', 0))
+            
+            # Format contexts for this source
+            source_text = f"Source: {source}\n"
+            source_text += "Title: " + source_contexts[0].get('title', 'Untitled') + "\n"
+            source_text += "Content:\n"
+            source_text += "\n".join([
+                f"[Chunk {ctx.get('chunk_index', 0)+1}/{ctx.get('total_chunks', 1)}] {ctx['text']}"
+                for ctx in source_contexts
+            ])
+            formatted_parts.append(source_text)
+        
+        return "\n\n".join(formatted_parts)
 
     def generate_response_with_sources(self, contexts: List[dict], query: str) -> str:
         """
@@ -118,16 +138,31 @@ class Chatbot:
             if cached_response is not None:
                 return cached_response
 
+            # Get unique source names for the overview
+            unique_sources = sorted(set(ctx['source'] for ctx in contexts))
+            source_overview = "\n".join([
+                f"* [Source {i+1}: {source}]" 
+                for i, source in enumerate(unique_sources)
+            ])
+
             messages = [
                 {"role": "system", "content": self.settings['response']['source_citation_prompt']},
                 {"role": "user", "content": f"""
-                Sources:
+                Source Overview:
+                {source_overview}
+
+                Source Details:
                 {formatted_contexts}
 
                 Question:
                 {query}
 
-                Please provide a comprehensive answer with source citations, including detailed explanations and examples where appropriate.
+                Please provide a comprehensive answer that synthesizes information across all sources. Remember to:
+                1. Start with the source overview list
+                2. Compare and contrast information from different sources
+                3. Organize information thematically rather than source-by-source
+                4. Note any agreements or disagreements between sources
+                5. Maintain balanced representation from all sources
                 """}
             ]
 

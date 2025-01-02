@@ -1,5 +1,69 @@
 # RAG System Architecture
 
+## System Overview
+
+The system implements a sophisticated RAG (Retrieval Augmented Generation) pipeline with the following key components:
+
+1. **Document Processing Pipeline**
+- Input: PDF and Word documents (.pdf, .doc, .docx)
+- Processing:
+  * Intelligent chunking with RecursiveCharacterTextSplitter
+  * Configurable chunk size (500) and overlap (50)
+  * Document structure and metadata preservation
+  * Title and section extraction
+- Output: Structured document chunks with metadata
+
+2. **Embedding Generation**
+- Model: sentence-transformers (all-MiniLM-L6-v2)
+- Features:
+  * Centralized embedding generation
+  * Batched processing
+  * Document and query embedding consistency
+  * Cosine similarity metric
+
+3. **Vector Storage (ChromaDB)**
+- Storage:
+  * HNSW index for efficient similarity search
+  * Rich metadata storage
+  * Atomic operations
+- Features:
+  * Source-based filtering
+  * Efficient chunk retrieval
+  * Comprehensive metadata querying
+
+4. **Search Architecture**
+- Two-stage process:
+  * Vector similarity search
+  * LLM-based reranking
+- Weighted scoring:
+  * 40% vector similarity
+  * 60% LLM relevance
+- Performance optimizations:
+  * Result caching
+  * Batch processing
+  * Fallback mechanisms
+
+5. **Data Flow**
+```
+Document → Chunks → Embeddings → Vector DB
+                                    ↓
+Query → Embedding → Vector Search → Rerank → Response
+```
+
+6. **Key Optimizations**
+- Caching:
+  * LLM relevance scores
+  * Response caching
+  * Embedding caching
+- Performance:
+  * Batched operations
+  * Efficient chunk management
+  * Deterministic ordering
+- Reliability:
+  * Atomic operations
+  * Error handling
+  * Fallback mechanisms
+
 ## Document Processing Architecture
 
 The system implements a centralized document processing pipeline with robust state tracking:

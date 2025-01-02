@@ -23,22 +23,114 @@ class TestChatbot(unittest.TestCase):
         key4 = self.chatbot._get_cache_key("TEST CONTEXT", "TEST QUERY")
         self.assertEqual(key1, key4)
 
-    def test_format_contexts_for_cache(self):
-        """Test context formatting is deterministic."""
+    def test_format_contexts_for_cache_with_source_grouping(self):
+        """Test context formatting with source grouping and metadata."""
         contexts = [
-            {"text": "Second text"},
-            {"text": "First text"},
-            {"text": "Third text"}
+            {
+                "text": "Second chunk",
+                "source": "doc1.pdf",
+                "title": "Document 1",
+                "chunk_index": 1,
+                "total_chunks": 2
+            },
+            {
+                "text": "First chunk",
+                "source": "doc1.pdf",
+                "title": "Document 1",
+                "chunk_index": 0,
+                "total_chunks": 2
+            },
+            {
+                "text": "Content from doc2",
+                "source": "doc2.pdf",
+                "title": "Document 2",
+                "chunk_index": 0,
+                "total_chunks": 1
+            }
         ]
         
-        # Test sorting is consistent
-        formatted1 = self.chatbot._format_contexts_for_cache(contexts)
-        formatted2 = self.chatbot._format_contexts_for_cache(contexts[::-1])  # Reverse order
-        self.assertEqual(formatted1, formatted2)
+        formatted = self.chatbot._format_contexts_for_cache(contexts)
         
-        # Verify format
-        expected = "Source 1:\nFirst text\n\nSource 2:\nSecond text\n\nSource 3:\nThird text"
-        self.assertEqual(formatted1, expected)
+        # Verify source grouping
+        self.assertIn("Source: doc1.pdf", formatted)
+        self.assertIn("Source: doc2.pdf", formatted)
+        
+        # Verify title inclusion
+        self.assertIn("Title: Document 1", formatted)
+        self.assertIn("Title: Document 2", formatted)
+        
+        # Verify chunk ordering within sources
+        doc1_index = formatted.index("doc1.pdf")
+        first_chunk_index = formatted.index("[Chunk 1/2]")
+        second_chunk_index = formatted.index("[Chunk 2/2]")
+        self.assertLess(first_chunk_index, second_chunk_index)
+        
+        # Verify content inclusion
+        self.assertIn("First chunk", formatted)
+        self.assertIn("Second chunk", formatted)
+        self.assertIn("Content from doc2", formatted)
+
+    def test_generate_response_with_sources_multi_document(self):
+        """Test source-cited response generation with multiple documents."""
+        mock_response = Mock()
+        mock_response.choices = [Mock(message=Mock(content="Test response with sources"))]
+        
+        contexts = [
+            {
+                "text": "Content from first doc",
+                "source": "doc1.pdf",
+                "title": "Document 1",
+                "chunk_index": 0,
+                "total_chunks": 1
+            },
+            {
+                "text": "Content from second doc",
+                "source": "doc2.pdf",
+                "title": "Document 2",
+                "chunk_index": 0,
+                "total_chunks": 1
+            }
+        ]
+        
+        with patch.object(self.chatbot.client.chat.completions, 'create', return_value=mock_response) as mock_create:
+            response = self.chatbot.generate_response_with_sources(contexts, "test query")
+            
+            # Verify source overview was included
+            call_args = mock_create.call_args[1]
+            messages = call_args['messages']
+            prompt = messages[1]['content']
+            
+            # Check source overview format
+            self.assertIn("* [Source 1: doc1.pdf]", prompt)
+            self.assertIn("* [Source 2: doc2.pdf]", prompt)
+            
+            # Check synthesis instructions
+            self.assertIn("synthesizes information across all sources", prompt)
+            self.assertIn("Compare and contrast information", prompt)
+            
+            # Verify source details format
+            self.assertIn("Source: doc1.pdf", prompt)
+            self.assertIn("Title: Document 1", prompt)
+            self.assertIn("Content from first doc", prompt)
+            self.assertIn("Source: doc2.pdf", prompt)
+            self.assertIn("Title: Document 2", prompt)
+            self.assertIn("Content from second doc", prompt)
+
+    def test_format_contexts_empty_metadata(self):
+        """Test context formatting handles missing metadata gracefully."""
+        contexts = [
+            {
+                "text": "Content without metadata"
+            }
+        ]
+        
+        formatted = self.chatbot._format_contexts_for_cache(contexts)
+        
+        # Verify default values are used
+        self.assertIn("Source: Unknown", formatted)
+        self.assertIn("Title: Untitled", formatted)
+        self.assertIn("[Chunk 1/1]", formatted)
+        self.assertIn("Content without metadata", formatted)
 
     def test_generate_response_caching(self):
         """Test response caching behavior."""
@@ -69,8 +161,20 @@ class TestChatbot(unittest.TestCase):
         
         with patch.object(self.chatbot.client.chat.completions, 'create', return_value=mock_response) as mock_create:
             contexts = [
-                {"text": "Context 1"},
-                {"text": "Context 2"}
+                {
+                    "text": "Context 1",
+                    "source": "doc1.pdf",
+                    "title": "Document 1",
+                    "chunk_index": 0,
+                    "total_chunks": 1
+                },
+                {
+                    "text": "Context 2",
+                    "source": "doc2.pdf",
+                    "title": "Document 2",
+                    "chunk_index": 0,
+                    "total_chunks": 1
+                }
             ]
 
             # First call should use API

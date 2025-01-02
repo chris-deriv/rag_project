@@ -80,6 +80,47 @@ class RAGApplication:
             )
         )
 
+    def _balance_results(self, results: List[Dict[str, Any]], source_names: List[str]) -> List[Dict[str, Any]]:
+        """
+        Balance results across multiple documents to ensure representation from each source.
+        
+        Args:
+            results: List of search results
+            source_names: List of source names to balance across
+            
+        Returns:
+            List of balanced results
+        """
+        if not source_names or len(source_names) <= 1:
+            return results
+            
+        # Group results by source
+        results_by_source = {}
+        for result in results:
+            source = result['metadata'].get('source_name', 'Unknown')
+            if source not in results_by_source:
+                results_by_source[source] = []
+            results_by_source[source].append(result)
+        
+        # Calculate minimum results per source
+        min_per_source = max(2, len(results) // len(source_names))
+        
+        # Build balanced results list
+        balanced_results = []
+        remaining_results = []
+        
+        # First, take minimum number from each source
+        for source in source_names:
+            source_results = results_by_source.get(source, [])
+            balanced_results.extend(source_results[:min_per_source])
+            remaining_results.extend(source_results[min_per_source:])
+        
+        # Add remaining results sorted by score
+        remaining_results.sort(key=lambda x: x['combined_score'], reverse=True)
+        balanced_results.extend(remaining_results)
+        
+        return balanced_results
+
     def query_documents(self, 
                        query: str, 
                        n_results: int = 5,
@@ -101,6 +142,8 @@ class RAGApplication:
             logger.info(f"Processing query: {query}")
             if source_names:
                 logger.info(f"Filtering by source names: {source_names}")
+                # Increase n_results when querying multiple documents
+                n_results = max(n_results, len(source_names) * 3)
             if title:
                 logger.info(f"Filtering by title: {title}")
             
@@ -111,6 +154,10 @@ class RAGApplication:
                 source_names=source_names,
                 title=title
             )
+            
+            # Balance results across multiple documents if needed
+            if source_names and len(source_names) > 1:
+                results = self._balance_results(results, source_names)
             
             # Extract contexts from results with source information
             contexts = []

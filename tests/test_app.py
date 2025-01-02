@@ -41,6 +41,112 @@ class TestRAGApplication(unittest.TestCase):
         self.assertEqual(sorted1[1]["text"], "text2")  # doc1, title1, index 1
         self.assertEqual(sorted1[2]["text"], "text3")  # doc2, title2, index 1
 
+    def test_balance_results_single_source(self):
+        """Test result balancing with a single source."""
+        results = [
+            {
+                'text': 'text1',
+                'metadata': {'source_name': 'doc1.pdf'},
+                'combined_score': 0.9
+            },
+            {
+                'text': 'text2',
+                'metadata': {'source_name': 'doc1.pdf'},
+                'combined_score': 0.8
+            }
+        ]
+        source_names = ['doc1.pdf']
+        
+        balanced = self.app._balance_results(results, source_names)
+        self.assertEqual(len(balanced), 2)
+        self.assertEqual(balanced, results)  # Should remain unchanged
+
+    def test_balance_results_multiple_sources(self):
+        """Test result balancing across multiple sources."""
+        results = [
+            {
+                'text': 'text1',
+                'metadata': {'source_name': 'doc1.pdf'},
+                'combined_score': 0.9
+            },
+            {
+                'text': 'text2',
+                'metadata': {'source_name': 'doc1.pdf'},
+                'combined_score': 0.8
+            },
+            {
+                'text': 'text3',
+                'metadata': {'source_name': 'doc2.pdf'},
+                'combined_score': 0.7
+            },
+            {
+                'text': 'text4',
+                'metadata': {'source_name': 'doc2.pdf'},
+                'combined_score': 0.6
+            }
+        ]
+        source_names = ['doc1.pdf', 'doc2.pdf']
+        
+        balanced = self.app._balance_results(results, source_names)
+        
+        # Verify minimum representation from each source
+        doc1_results = [r for r in balanced if r['metadata']['source_name'] == 'doc1.pdf']
+        doc2_results = [r for r in balanced if r['metadata']['source_name'] == 'doc2.pdf']
+        
+        self.assertGreaterEqual(len(doc1_results), 2)
+        self.assertGreaterEqual(len(doc2_results), 2)
+        
+        # Verify overall ordering by score within each source
+        self.assertGreater(doc1_results[0]['combined_score'], doc1_results[1]['combined_score'])
+        self.assertGreater(doc2_results[0]['combined_score'], doc2_results[1]['combined_score'])
+
+    def test_balance_results_uneven_sources(self):
+        """Test result balancing with uneven source distribution."""
+        results = [
+            {
+                'text': 'text1',
+                'metadata': {'source_name': 'doc1.pdf'},
+                'combined_score': 0.9
+            },
+            {
+                'text': 'text2',
+                'metadata': {'source_name': 'doc1.pdf'},
+                'combined_score': 0.8
+            },
+            {
+                'text': 'text3',
+                'metadata': {'source_name': 'doc1.pdf'},
+                'combined_score': 0.7
+            },
+            {
+                'text': 'text4',
+                'metadata': {'source_name': 'doc2.pdf'},
+                'combined_score': 0.6
+            }
+        ]
+        source_names = ['doc1.pdf', 'doc2.pdf']
+        
+        balanced = self.app._balance_results(results, source_names)
+        
+        # Verify minimum representation from each source
+        doc1_results = [r for r in balanced if r['metadata']['source_name'] == 'doc1.pdf']
+        doc2_results = [r for r in balanced if r['metadata']['source_name'] == 'doc2.pdf']
+        
+        self.assertGreaterEqual(len(doc1_results), 2)
+        self.assertGreaterEqual(len(doc2_results), 1)
+
+    def test_query_documents_result_count_scaling(self):
+        """Test that n_results scales with number of sources."""
+        with patch.object(self.app.search_engine, 'search') as mock_search:
+            with patch.object(self.app.chatbot, 'generate_response_with_sources', return_value="test response"):
+                # Test with single source
+                self.app.query_documents("test", source_names=["doc1.pdf"])
+                self.assertEqual(mock_search.call_args[1]['n_results'], 5)  # Default
+                
+                # Test with multiple sources
+                self.app.query_documents("test", source_names=["doc1.pdf", "doc2.pdf"])
+                self.assertEqual(mock_search.call_args[1]['n_results'], 6)  # 2 sources * 3
+
     def test_index_documents_verification(self):
         """Test document indexing verifies documents in vector database."""
         documents = [
