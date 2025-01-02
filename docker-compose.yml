@@ -12,7 +12,7 @@ services:
       - ${PWD}/uploads:/app/uploads:rw  # Use absolute path with PWD
       - tmp_data:/app/tmp:rw  # Add persistent volume for tmp directory
     env_file:
-      - .env
+      - .env.docker
     environment:
       - FLASK_APP=src.web:app
       - FLASK_ENV=development
