@@ -62,3 +62,5 @@ ENV/
 /chroma_db
 /data
 /data/**/*
+backend/model_cache/
+backend/src/model_cache/

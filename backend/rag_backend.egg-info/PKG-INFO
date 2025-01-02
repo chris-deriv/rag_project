@@ -1,0 +1,12 @@
+Metadata-Version: 2.1
+Name: rag-backend
+Version: 0.1.0
+Requires-Dist: flask
+Requires-Dist: chromadb
+Requires-Dist: openai
+Requires-Dist: sentence-transformers
+Requires-Dist: pypdf
+Requires-Dist: python-docx
+Requires-Dist: langchain
+Requires-Dist: tiktoken
+Requires-Dist: numpy
