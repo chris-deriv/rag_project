@@ -1,9 +1,0 @@
-flask
-chromadb
-openai
-sentence-transformers
-pypdf
-python-docx
-langchain
-tiktoken
-numpy
