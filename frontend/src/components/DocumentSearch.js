@@ -176,6 +176,25 @@ const DocumentSearch = ({ onDocumentsSelect, selectedDocuments, refreshTrigger =
     }
   };
 
+  const getSecondaryContent = (doc) => {
+    return (
+      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+        {getStatusChip(doc)}
+        {doc.status === 'completed' && (
+          <Typography 
+            variant="caption" 
+            sx={{ 
+              color: 'text.secondary',
+              fontSize: '0.75rem'
+            }}
+          >
+            {doc.chunk_count} chunks
+          </Typography>
+        )}
+      </Box>
+    );
+  };
+
   return (
     <Box sx={{ 
       display: 'flex',
@@ -313,7 +332,7 @@ const DocumentSearch = ({ onDocumentsSelect, selectedDocuments, refreshTrigger =
                   </Typography>
                 </Tooltip>
               }
-              secondary={getStatusChip(doc)}
+              secondary={getSecondaryContent(doc)}
               secondaryTypographyProps={{
                 sx: { 
                   mt: 0.25,  // Reduce space between primary and secondary text
