@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { getSettings, updateSettings } from '../api';
+import api from '../api';
 import {
     TextField,
     Select,
@@ -27,7 +27,7 @@ const SettingsPanel = ({ onClose }) => {
     const loadSettings = async () => {
         try {
             setLoading(true);
-            const data = await getSettings();
+            const data = await api.getSettings();
             setSettings(data);
             setError(null);
         } catch (err) {
@@ -41,7 +41,7 @@ const SettingsPanel = ({ onClose }) => {
     const handleSubmit = async (e) => {
         e.preventDefault();
         try {
-            const response = await updateSettings(settings);
+            const response = await api.updateSettings(settings);
             if (response.error) {
                 setError(response.error);
                 setSuccess(null);

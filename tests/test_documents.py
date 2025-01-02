@@ -1,3 +1,4 @@
+"""Test document processing functionality."""
 import pytest
 import tempfile
 import os
@@ -43,13 +44,14 @@ class TestDocumentStore:
         # Create a temporary PDF file
         with tempfile.NamedTemporaryFile(suffix='.pdf', mode='w+b', delete=False) as f:
             test_pdf = f.name
+            test_pdf_name = os.path.basename(test_pdf)
 
-        # Configure mock PDF extraction
+        # Configure mock PDF extraction with actual temp filename
         mock_extract_text.return_value = [
             {
                 'text': 'Test section 1',
                 'metadata': {
-                    'source_name': 'test.pdf',
+                    'source_name': test_pdf_name,
                     'title': 'Test Document',
                     'file_type': 'pdf',
                     'section_type': 'content',
@@ -60,7 +62,7 @@ class TestDocumentStore:
             {
                 'text': 'Test section 2',
                 'metadata': {
-                    'source_name': 'test.pdf',
+                    'source_name': test_pdf_name,
                     'title': 'Test Document',
                     'file_type': 'pdf',
                     'section_type': 'content',
@@ -100,7 +102,7 @@ class TestDocumentStore:
 
             # Verify state tracking
             assert state.status == 'completed'
-            assert state.source_name == 'test.pdf'
+            assert state.source_name == test_pdf_name
             assert state.chunk_count == 2
             assert state.total_chunks == 2
             assert state.error is None
@@ -252,13 +254,14 @@ class TestDocumentProcessor:
         # Create a temporary PDF file
         with tempfile.NamedTemporaryFile(suffix='.pdf', mode='w+b', delete=False) as f:
             test_pdf = f.name
+            test_pdf_name = os.path.basename(test_pdf)
 
         # Configure mock PDF extraction with inconsistent total_chunks
         mock_extract_text.return_value = [
             {
                 'text': 'Test section 1',
                 'metadata': {
-                    'source_name': 'test.pdf',
+                    'source_name': test_pdf_name,
                     'title': 'Test Document',
                     'file_type': 'pdf',
                     'section_type': 'content',
@@ -269,7 +272,7 @@ class TestDocumentProcessor:
             {
                 'text': 'Test section 2',
                 'metadata': {
-                    'source_name': 'test.pdf',
+                    'source_name': test_pdf_name,
                     'title': 'Test Document',
                     'file_type': 'pdf',
                     'section_type': 'content',
