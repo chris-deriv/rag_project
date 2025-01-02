@@ -14,6 +14,7 @@ import subprocess
 import tempfile
 from .database import VectorDatabase
 from .embedding import EmbeddingGenerator
+from config.dynamic_settings import settings_manager
 
 # Configure logging with immediate output
 logging.basicConfig(
@@ -43,21 +44,31 @@ class DocumentChunk:
 class DocumentProcessor:
     """Handles document processing with advanced chunking strategies."""
     
-    def __init__(self, 
-                 chunk_size: int = 500,
-                 chunk_overlap: int = 50,
-                 length_function: str = "char"):
+    def __init__(self, length_function: str = "char"):
         """Initialize the document processor."""
-        self.chunk_size = chunk_size
-        self.chunk_overlap = chunk_overlap
+        # Get initial settings
+        self.settings = settings_manager.get_all_settings()
         self.length_function = length_function
         self.tokenizer = tiktoken.get_encoding("cl100k_base")
         
-        # Initialize text splitter with better separators
+        # Initialize text splitter with settings
+        self._init_text_splitter()
+        
+        # Register as observer for settings changes
+        settings_manager.add_observer(self._handle_settings_change)
+
+    def _handle_settings_change(self, setting_name: str, new_value: dict) -> None:
+        """Handle settings changes from the settings manager."""
+        if setting_name == 'document_processing':
+            self.settings['document_processing'] = new_value
+            self._init_text_splitter()
+
+    def _init_text_splitter(self) -> None:
+        """Initialize or reinitialize the text splitter with current settings."""
         self.text_splitter = RecursiveCharacterTextSplitter(
             separators=["\n\n", "\n", ".", "!", "?", ";", ":", " ", ""],
-            chunk_size=chunk_size,
-            chunk_overlap=chunk_overlap,
+            chunk_size=self.settings['document_processing']['chunk_size'],
+            chunk_overlap=self.settings['document_processing']['chunk_overlap'],
             length_function=self._get_length_function(),
             is_separator_regex=False
         )
@@ -187,6 +198,13 @@ class DocumentProcessor:
             raise ValueError(f"Error processing DOCX: {str(e)}")
             
         return sections
+
+    def __del__(self):
+        """Clean up by removing observer when object is destroyed."""
+        try:
+            settings_manager.remove_observer(self._handle_settings_change)
+        except:
+            pass  # Ignore errors during cleanup
 
 class DocumentStore:
     """Manages document storage and retrieval with atomic operations."""

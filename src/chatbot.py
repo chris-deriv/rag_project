@@ -2,6 +2,7 @@ from typing import List
 import httpx
 from openai import OpenAI
 from config.settings import OPENAI_API_KEY
+from config.dynamic_settings import settings_manager
 
 class Chatbot:
     def __init__(self):
@@ -11,9 +12,21 @@ class Chatbot:
             api_key=OPENAI_API_KEY,
             http_client=http_client
         )
-        self.model = "gpt-3.5-turbo"  # Using the more modern chat model
+        # Get initial settings
+        self.settings = settings_manager.get_all_settings()
+        
+        # Register as observer for settings changes
+        settings_manager.add_observer(self._handle_settings_change)
+        
         # Cache for storing responses
         self._response_cache = {}
+
+    def _handle_settings_change(self, setting_name: str, new_value: dict) -> None:
+        """Handle settings changes from the settings manager."""
+        if setting_name in ['llm', 'response']:
+            self.settings[setting_name] = new_value
+            # Clear cache when settings change
+            self._response_cache.clear()
 
     def _get_cache_key(self, context: str, query: str) -> str:
         """Generate a deterministic cache key for responses."""
@@ -44,14 +57,7 @@ class Chatbot:
                 return cached_response
 
             messages = [
-                {"role": "system", "content": """You are a knowledgeable assistant that provides comprehensive and detailed answers based on the provided context. Your responses should:
-                1. Be thorough and well-explained, covering all relevant aspects of the question
-                2. Include examples or analogies when appropriate to enhance understanding
-                3. Break down complex concepts into digestible parts
-                4. Provide additional relevant information that adds value to the answer
-                5. Maintain clarity while being detailed
-                6. Use proper formatting and structure to organize information
-                """},
+                {"role": "system", "content": self.settings['response']['system_prompt']},
                 {"role": "user", "content": f"""
                 Context:
                 {context}
@@ -64,10 +70,10 @@ class Chatbot:
             ]
 
             response = self.client.chat.completions.create(
-                model=self.model,
+                model=self.settings['llm']['model'],
                 messages=messages,
-                temperature=0.3,  # Slightly increased for more natural responses while maintaining consistency
-                max_tokens=1000,  # Increased to allow for more detailed responses
+                temperature=self.settings['llm']['temperature'],
+                max_tokens=self.settings['llm']['max_tokens'],
                 seed=42  # Fixed seed for consistent sampling
             )
 
@@ -113,17 +119,7 @@ class Chatbot:
                 return cached_response
 
             messages = [
-                {"role": "system", "content": """
-                You are a knowledgeable assistant that provides comprehensive answers based on provided sources. For each response:
-                1. Use information only from the provided sources
-                2. Cite sources using [Source X] notation
-                3. Provide detailed explanations and elaborate on key points
-                4. Include relevant examples or analogies when appropriate
-                5. Break down complex information into clear, digestible sections
-                6. Synthesize information from multiple sources when applicable
-                7. If the sources don't contain relevant information, explain what's missing
-                8. Use proper formatting to organize information clearly
-                """},
+                {"role": "system", "content": self.settings['response']['source_citation_prompt']},
                 {"role": "user", "content": f"""
                 Sources:
                 {formatted_contexts}
@@ -136,10 +132,10 @@ class Chatbot:
             ]
 
             response = self.client.chat.completions.create(
-                model=self.model,
+                model=self.settings['llm']['model'],
                 messages=messages,
-                temperature=0.3,  # Slightly increased for more natural responses while maintaining consistency
-                max_tokens=1000,  # Increased to allow for more detailed responses
+                temperature=self.settings['llm']['temperature'],
+                max_tokens=self.settings['llm']['max_tokens'],
                 seed=42  # Fixed seed for consistent sampling
             )
 
@@ -150,3 +146,10 @@ class Chatbot:
 
         except Exception as e:
             raise Exception(f"Error generating response with sources: {str(e)}")
+
+    def __del__(self):
+        """Clean up by removing observer when object is destroyed."""
+        try:
+            settings_manager.remove_observer(self._handle_settings_change)
+        except:
+            pass  # Ignore errors during cleanup
