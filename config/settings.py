@@ -68,17 +68,17 @@ EMBEDDING_MODEL_NAME = get_env_str("EMBEDDING_MODEL_NAME", "all-MiniLM-L6-v2")
 
 # Settings dictionaries for dynamic settings
 LLM_SETTINGS = {
-    'temperature': OPENAI_TEMPERATURE,  # 0.3
-    'max_tokens': OPENAI_MAX_TOKENS,    # 1000
-    'model': OPENAI_MODEL               # "gpt-3.5-turbo"
+    'temperature': OPENAI_TEMPERATURE,
+    'max_tokens': OPENAI_MAX_TOKENS,
+    'model': OPENAI_MODEL
 }
 
 DOCUMENT_PROCESSING_SETTINGS = {
-    'chunk_size': CHUNK_SIZE,       # 500
-    'chunk_overlap': CHUNK_OVERLAP  # 50
+    'chunk_size': CHUNK_SIZE,
+    'chunk_overlap': CHUNK_OVERLAP
 }
 
 CACHE_SETTINGS = {
-    'enabled': CACHE_ENABLED,           # True
-    'size': RESPONSE_CACHE_SIZE         # 1000
+    'enabled': CACHE_ENABLED,
+    'size': RESPONSE_CACHE_SIZE
 }
