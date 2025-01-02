@@ -209,7 +209,7 @@ const DocumentSearch = ({ onDocumentsSelect, selectedDocuments, refreshTrigger =
       <TextField
         fullWidth
         size="small"
-        label="Search document titles"
+        label="Search documents"
         variant="outlined"
         value={searchQuery}
         onChange={(e) => setSearchQuery(e.target.value)}
@@ -318,7 +318,7 @@ const DocumentSearch = ({ onDocumentsSelect, selectedDocuments, refreshTrigger =
             </ListItemIcon>
             <ListItemText
               primary={
-                <Tooltip title={doc.title || doc.source_name} placement="top">
+                <Tooltip title={doc.source_name} placement="top">
                   <Typography
                     variant="body2"
                     sx={{
@@ -328,7 +328,7 @@ const DocumentSearch = ({ onDocumentsSelect, selectedDocuments, refreshTrigger =
                       fontSize: '0.875rem'
                     }}
                   >
-                    {doc.title || doc.source_name}
+                    {doc.source_name}
                   </Typography>
                 </Tooltip>
               }

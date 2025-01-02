@@ -1,7 +1,7 @@
 """Integration tests for settings management."""
 import pytest
 import json
-from src.web import app
+from src.api import app
 from src.config.dynamic_settings import settings_manager
 
 @pytest.fixture

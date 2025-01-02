@@ -86,7 +86,7 @@ const ChatInterface = ({ selectedDocuments, onDocumentDelete }) => {
             {selectedDocuments.map((doc, index) => (
               <Chip
                 key={index}
-                label={doc.title || doc.source_name}
+                label={doc.source_name}
                 color="primary"
                 variant="outlined"
                 onDelete={() => onDocumentDelete(doc)}
