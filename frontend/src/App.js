@@ -1,14 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import api from './api';
 import { Container, Grid, Paper, Box, Button, Dialog, DialogTitle, DialogContent, DialogActions, Typography } from '@mui/material';
+import SettingsIcon from '@mui/icons-material/Settings';
 import FileUpload from './components/FileUpload';
 import DocumentSearch from './components/DocumentSearch';
 import ChatInterface from './components/ChatInterface';
+import SettingsPanel from './components/SettingsPanel';
 
 function App() {
   const [selectedDocuments, setSelectedDocuments] = useState([]);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [processingDocument, setProcessingDocument] = useState(false);
 
@@ -135,9 +138,22 @@ function App() {
                   borderTop: '1px solid',
                   borderColor: 'divider',
                   display: 'flex',
-                  justifyContent: 'flex-end'
+                  justifyContent: 'space-between',
+                  alignItems: 'center'
                 }}
               >
+                <Button
+                  variant="outlined"
+                  size="small"
+                  onClick={() => setSettingsOpen(true)}
+                  startIcon={<SettingsIcon />}
+                  sx={{ 
+                    fontSize: '0.75rem',
+                    textTransform: 'none'
+                  }}
+                >
+                  Settings
+                </Button>
                 <Button
                   variant="outlined"
                   color="error"
@@ -174,6 +190,19 @@ function App() {
                   Reset
                 </Button>
               </DialogActions>
+            </Dialog>
+
+            {/* Settings Dialog */}
+            <Dialog 
+              open={settingsOpen} 
+              onClose={() => setSettingsOpen(false)}
+              maxWidth="md"
+              fullWidth
+            >
+              <DialogTitle>Settings</DialogTitle>
+              <DialogContent>
+                <SettingsPanel onClose={() => setSettingsOpen(false)} />
+              </DialogContent>
             </Dialog>
             </Box>
           </Paper>

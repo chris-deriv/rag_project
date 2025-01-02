@@ -61,6 +61,18 @@ const api = {
   deleteDocument: async (filename) => {
     const response = await axios.delete(`${API_BASE_URL}/document/${filename}`);
     return response.data;
+  },
+
+  // Get settings
+  getSettings: async () => {
+    const response = await axios.get(`${API_BASE_URL}/settings`);
+    return response.data;
+  },
+
+  // Update settings
+  updateSettings: async (settings) => {
+    const response = await axios.post(`${API_BASE_URL}/settings`, settings);
+    return response.data;
   }
 };
 

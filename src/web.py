@@ -6,6 +6,7 @@ from werkzeug.utils import secure_filename
 from src.app import RAGApplication
 from src.documents import get_documents, process_document, document_store, get_processing_state
 from src.database import VectorDatabase
+from config.dynamic_settings import settings_manager
 import threading
 
 # Configure logging
@@ -301,6 +302,33 @@ def get_document_chunks(source_name):
         chunks = vector_db.get_document_chunks(source_name)
         return jsonify(chunks)
     except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/settings', methods=['GET', 'POST'])
+def handle_settings():
+    """Get or update dynamic settings."""
+    if request.method == 'GET':
+        return jsonify(settings_manager.get_all_settings())
+    
+    try:
+        if not request.is_json:
+            return jsonify({'error': 'Invalid Content-Type, expected application/json'}), 400
+            
+        new_settings = request.get_json()
+        if not new_settings:
+            return jsonify({'error': 'No settings provided'}), 400
+            
+        success = settings_manager.update_settings(new_settings)
+        if success:
+            return jsonify({
+                'message': 'Settings updated successfully',
+                'settings': settings_manager.get_all_settings()
+            })
+        else:
+            return jsonify({'error': 'Invalid settings provided'}), 400
+            
+    except Exception as e:
+        logger.error(f"Error updating settings: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
