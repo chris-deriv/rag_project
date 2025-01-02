@@ -76,23 +76,23 @@ def mock_settings(monkeypatch):
     
     # Mock the settings imports
     monkeypatch.setattr(
-        'rag_backend.config.dynamic_settings.LLM_SETTINGS',
+        'src.config.dynamic_settings.LLM_SETTINGS',
         mock_llm_settings
     )
     monkeypatch.setattr(
-        'rag_backend.config.dynamic_settings.DOCUMENT_PROCESSING_SETTINGS',
+        'src.config.dynamic_settings.DOCUMENT_PROCESSING_SETTINGS',
         mock_doc_settings
     )
     monkeypatch.setattr(
-        'rag_backend.config.dynamic_settings.CACHE_SETTINGS',
+        'src.config.dynamic_settings.CACHE_SETTINGS',
         mock_cache_settings
     )
     monkeypatch.setattr(
-        'rag_backend.config.dynamic_settings.BASIC_SYSTEM_PROMPT',
+        'src.config.dynamic_settings.BASIC_SYSTEM_PROMPT',
         'Test system prompt'
     )
     monkeypatch.setattr(
-        'rag_backend.config.dynamic_settings.SOURCE_CITATION_PROMPT',
+        'src.config.dynamic_settings.SOURCE_CITATION_PROMPT',
         'Test citation prompt'
     )
 

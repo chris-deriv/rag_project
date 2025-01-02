@@ -4,11 +4,11 @@ import tempfile
 import os
 from unittest.mock import Mock, patch, PropertyMock
 import numpy as np
-from rag_backend.documents import DocumentStore, DocumentProcessor, DocumentChunk, ProcessingState
+from src.documents import DocumentStore, DocumentProcessor, DocumentChunk, ProcessingState
 
 @pytest.fixture
 def mock_extract_text():
-    with patch('rag_backend.documents.DocumentProcessor._extract_pdf_text') as mock:
+    with patch('src.documents.DocumentProcessor._extract_pdf_text') as mock:
         yield mock
 
 class TestProcessingState:
@@ -95,8 +95,8 @@ class TestDocumentStore:
 
         try:
             # Initialize store with mocked dependencies
-            with patch('rag_backend.documents.EmbeddingGenerator', return_value=mock_embedding_generator):
-                with patch('rag_backend.documents.VectorDatabase', return_value=mock_vector_db):
+            with patch('src.documents.EmbeddingGenerator', return_value=mock_embedding_generator):
+                with patch('src.documents.VectorDatabase', return_value=mock_vector_db):
                     store = DocumentStore()
                     state = store.process_and_store_document(test_pdf)
 
@@ -139,7 +139,7 @@ class TestDocumentStore:
 
         try:
             # Mock an error during processing
-            with patch('rag_backend.documents.DocumentProcessor.process_document', side_effect=ValueError("Processing failed")):
+            with patch('src.documents.DocumentProcessor.process_document', side_effect=ValueError("Processing failed")):
                 store = DocumentStore()
                 with pytest.raises(ValueError):
                     state = store.process_and_store_document(test_pdf)
@@ -177,7 +177,7 @@ class TestDocumentStore:
         mock_vector_db.get_all_documents = Mock(return_value=mock_docs)
 
         # Initialize store with mocked database
-        with patch('rag_backend.documents.VectorDatabase', return_value=mock_vector_db):
+        with patch('src.documents.VectorDatabase', return_value=mock_vector_db):
             store = DocumentStore()
             documents = store.get_documents()
 
@@ -294,8 +294,8 @@ class TestDocumentProcessor:
 
         try:
             # Initialize store with mocked dependencies
-            with patch('rag_backend.documents.EmbeddingGenerator', return_value=mock_embedding_generator):
-                with patch('rag_backend.documents.VectorDatabase', return_value=mock_vector_db):
+            with patch('src.documents.EmbeddingGenerator', return_value=mock_embedding_generator):
+                with patch('src.documents.VectorDatabase', return_value=mock_vector_db):
                     store = DocumentStore()
                     with pytest.raises(ValueError) as exc_info:
                         state = store.process_and_store_document(test_pdf)
@@ -325,7 +325,7 @@ class TestDocumentProcessor:
 
         # Test file not found
         nonexistent_file = "nonexistent.pdf"
-        with patch('rag_backend.documents.DocumentProcessor._extract_pdf_text', side_effect=FileNotFoundError("No such file or directory: 'nonexistent.pdf'")):
+        with patch('src.documents.DocumentProcessor._extract_pdf_text', side_effect=FileNotFoundError("No such file or directory: 'nonexistent.pdf'")):
             with pytest.raises(FileNotFoundError) as exc_info:
                 processor.process_document(nonexistent_file)
             assert "File not found" in str(exc_info.value)

@@ -14,7 +14,7 @@ import subprocess
 import tempfile
 from .database import VectorDatabase
 from .embedding import EmbeddingGenerator
-from rag_backend.config.dynamic_settings import settings_manager
+from config.dynamic_settings import settings_manager
 
 # Configure logging with immediate output
 logging.basicConfig(

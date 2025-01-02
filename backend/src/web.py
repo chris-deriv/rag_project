@@ -3,10 +3,10 @@ from flask_cors import CORS
 import os
 import logging
 from werkzeug.utils import secure_filename
-from rag_backend.app import RAGApplication
-from rag_backend.documents import get_documents, process_document, document_store, get_processing_state
-from rag_backend.database import VectorDatabase
-from rag_backend.config.dynamic_settings import settings_manager
+from .app import RAGApplication
+from .documents import get_documents, process_document, document_store, get_processing_state
+from .database import VectorDatabase
+from .config.dynamic_settings import settings_manager
 import threading
 
 # Configure logging

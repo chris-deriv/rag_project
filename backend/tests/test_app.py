@@ -2,7 +2,7 @@
 import unittest
 import numpy as np
 from unittest.mock import Mock, patch, PropertyMock
-from rag_backend.app import RAGApplication
+from src.app import RAGApplication
 
 class TestRAGApplication(unittest.TestCase):
     def setUp(self):
@@ -169,7 +169,7 @@ class TestRAGApplication(unittest.TestCase):
             'total_chunks': 5
         }
 
-        with patch('rag_backend.documents.document_store.get_document_info', return_value=mock_doc_info) as mock_get_info:
+        with patch('src.documents.document_store.get_document_info', return_value=mock_doc_info) as mock_get_info:
             self.app.index_documents(documents)
             
             # Verify document info was checked for each document
@@ -185,7 +185,7 @@ class TestRAGApplication(unittest.TestCase):
             }
         ]
 
-        with patch('rag_backend.documents.document_store.get_document_info') as mock_get_info:
+        with patch('src.documents.document_store.get_document_info') as mock_get_info:
             self.app.index_documents(documents)
             
             # Verify no document info check was attempted
@@ -201,13 +201,13 @@ class TestRAGApplication(unittest.TestCase):
         ]
 
         # Mock document_store to return None (document not found)
-        with patch('rag_backend.documents.document_store.get_document_info', return_value=None) as mock_get_info:
+        with patch('src.documents.document_store.get_document_info', return_value=None) as mock_get_info:
             self.app.index_documents(documents)
             
             # Verify document info was checked
             mock_get_info.assert_called_once_with('doc1.pdf')
 
-    @patch('rag_backend.embedding.EmbeddingGenerator.generate_embeddings')
+    @patch('src.embedding.EmbeddingGenerator.generate_embeddings')
     def test_query_documents_deterministic(self, mock_generate_embeddings):
         """Test query processing is deterministic."""
         # Setup mock embeddings
@@ -260,7 +260,7 @@ class TestRAGApplication(unittest.TestCase):
                 self.assertEqual(contexts[0]["source"], "doc1")
                 self.assertEqual(contexts[1]["source"], "doc2")
 
-    @patch('rag_backend.embedding.EmbeddingGenerator.generate_embeddings')
+    @patch('src.embedding.EmbeddingGenerator.generate_embeddings')
     def test_query_documents_with_source_names(self, mock_generate_embeddings):
         """Test query processing with source names filter."""
         # Setup mock embeddings
@@ -297,7 +297,7 @@ class TestRAGApplication(unittest.TestCase):
                 call_kwargs = mock_search.call_args[1]
                 self.assertEqual(call_kwargs['source_names'], source_names)
 
-    @patch('rag_backend.embedding.EmbeddingGenerator.generate_embeddings')
+    @patch('src.embedding.EmbeddingGenerator.generate_embeddings')
     def test_query_documents_with_source_names_and_title(self, mock_generate_embeddings):
         """Test query processing with both source names and title filters."""
         # Setup mock embeddings
@@ -346,7 +346,7 @@ class TestRAGApplication(unittest.TestCase):
         self.app.index_documents([{"id": "1", "text": "test"}])  # Should log warning and skip
 
         # Test query error
-        with patch('rag_backend.search.SearchEngine.search', side_effect=Exception("Query error")):
+        with patch('src.search.SearchEngine.search', side_effect=Exception("Query error")):
             with self.assertRaises(Exception) as context:
                 self.app.query_documents("test query")
             self.assertIn("Query error", str(context.exception))

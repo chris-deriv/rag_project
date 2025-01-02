@@ -1,6 +1,6 @@
 """Unit tests for vector database functionality."""
 import pytest
-from rag_backend.database import VectorDatabase
+from src.database import VectorDatabase
 import numpy as np
 from unittest.mock import patch, MagicMock
 

@@ -1,8 +1,8 @@
 from typing import List
 import httpx
 from openai import OpenAI
-from rag_backend.config.settings import OPENAI_API_KEY
-from rag_backend.config.dynamic_settings import settings_manager
+from config.settings import OPENAI_API_KEY
+from config.dynamic_settings import settings_manager
 
 class Chatbot:
     def __init__(self):

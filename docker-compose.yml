@@ -16,7 +16,7 @@ services:
     env_file:
       - ./backend/.env.docker
     environment:
-      - FLASK_APP=rag_backend.web:app
+      - FLASK_APP=src.web:app
       - FLASK_ENV=development
       - TRANSFORMERS_CACHE=/app/cache/huggingface
       - TIKTOKEN_CACHE_DIR=/app/cache/tiktoken

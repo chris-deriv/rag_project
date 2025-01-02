@@ -1,5 +1,5 @@
 import pytest
-from rag_backend.web import app
+from src.web import app
 from unittest.mock import patch, Mock, ANY
 import json
 import io
@@ -13,27 +13,27 @@ def client():
 
 @pytest.fixture
 def mock_vector_db():
-    with patch('rag_backend.web.vector_db') as mock_db:
+    with patch('src.web.vector_db') as mock_db:
         yield mock_db
 
 @pytest.fixture
 def mock_rag_app():
-    with patch('rag_backend.web.rag_app') as mock_app:
+    with patch('src.web.rag_app') as mock_app:
         yield mock_app
 
 @pytest.fixture
 def mock_add_document():
-    with patch('rag_backend.web.add_document') as mock_add:
+    with patch('src.web.add_document') as mock_add:
         yield mock_add
 
 @pytest.fixture
 def mock_get_documents():
-    with patch('rag_backend.web.get_documents') as mock_get:
+    with patch('src.web.get_documents') as mock_get:
         yield mock_get
 
 @pytest.fixture
 def mock_document_store():
-    with patch('rag_backend.web.document_store') as mock_store:
+    with patch('src.web.document_store') as mock_store:
         # Create a mock ProcessingState
         mock_state = Mock()
         mock_state.status = 'completed'

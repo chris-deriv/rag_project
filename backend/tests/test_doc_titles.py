@@ -2,7 +2,7 @@
 import os
 import io
 from unittest.mock import Mock, patch
-from rag_backend.documents import DocumentProcessor
+from src.documents import DocumentProcessor
 
 def test_pdf_title_from_metadata():
     """Test PDF title extraction from metadata."""
@@ -19,9 +19,9 @@ def test_pdf_title_from_metadata():
             self.pages = mock_pages
     
     # Monkeypatch PdfReader and os.path.exists
-    import rag_backend.documents
-    original_pdfreader = rag_backend.documents.PdfReader
-    rag_backend.documents.PdfReader = MockPdfReader
+    import src.documents
+    original_pdfreader = src.documents.PdfReader
+    src.documents.PdfReader = MockPdfReader
     
     try:
         # Mock os.path.exists to return True
@@ -34,7 +34,7 @@ def test_pdf_title_from_metadata():
             print("✓ PDF title from metadata test passed")
     finally:
         # Restore original
-        rag_backend.documents.PdfReader = original_pdfreader
+        src.documents.PdfReader = original_pdfreader
 
 def test_pdf_title_from_content():
     """Test PDF title extraction from first page content."""
@@ -51,9 +51,9 @@ def test_pdf_title_from_content():
             self.pages = mock_pages
     
     # Monkeypatch PdfReader and os.path.exists
-    import rag_backend.documents
-    original_pdfreader = rag_backend.documents.PdfReader
-    rag_backend.documents.PdfReader = MockPdfReader
+    import src.documents
+    original_pdfreader = src.documents.PdfReader
+    src.documents.PdfReader = MockPdfReader
     
     try:
         # Mock os.path.exists to return True
@@ -66,7 +66,7 @@ def test_pdf_title_from_content():
             print("✓ PDF title from content test passed")
     finally:
         # Restore original
-        rag_backend.documents.PdfReader = original_pdfreader
+        src.documents.PdfReader = original_pdfreader
 
 def test_pdf_title_fallback():
     """Test PDF title fallback to filename."""
@@ -83,9 +83,9 @@ def test_pdf_title_fallback():
             self.pages = mock_pages
     
     # Monkeypatch PdfReader and os.path.exists
-    import rag_backend.documents
-    original_pdfreader = rag_backend.documents.PdfReader
-    rag_backend.documents.PdfReader = MockPdfReader
+    import src.documents
+    original_pdfreader = src.documents.PdfReader
+    src.documents.PdfReader = MockPdfReader
     
     try:
         # Mock os.path.exists to return True
@@ -98,7 +98,7 @@ def test_pdf_title_fallback():
             print("✓ PDF title fallback test passed")
     finally:
         # Restore original
-        rag_backend.documents.PdfReader = original_pdfreader
+        src.documents.PdfReader = original_pdfreader
 
 def test_docx_title_from_properties():
     """Test DOCX title extraction from core properties."""
@@ -116,9 +116,9 @@ def test_docx_title_from_properties():
             self.paragraphs = mock_doc.paragraphs
     
     # Monkeypatch Document and os.path.exists
-    import rag_backend.documents
-    original_document = rag_backend.documents.Document
-    rag_backend.documents.Document = MockDocument
+    import src.documents
+    original_document = src.documents.Document
+    src.documents.Document = MockDocument
     
     try:
         # Mock os.path.exists to return True
@@ -131,7 +131,7 @@ def test_docx_title_from_properties():
             print("✓ DOCX title from properties test passed")
     finally:
         # Restore original
-        rag_backend.documents.Document = original_document
+        src.documents.Document = original_document
 
 def test_docx_title_fallback():
     """Test DOCX title fallback to filename."""
@@ -149,9 +149,9 @@ def test_docx_title_fallback():
             self.paragraphs = mock_doc.paragraphs
     
     # Monkeypatch Document and os.path.exists
-    import rag_backend.documents
-    original_document = rag_backend.documents.Document
-    rag_backend.documents.Document = MockDocument
+    import src.documents
+    original_document = src.documents.Document
+    src.documents.Document = MockDocument
     
     try:
         # Mock os.path.exists to return True
@@ -164,7 +164,7 @@ def test_docx_title_fallback():
             print("✓ DOCX title fallback test passed")
     finally:
         # Restore original
-        rag_backend.documents.Document = original_document
+        src.documents.Document = original_document
 
 if __name__ == '__main__':
     print("\nRunning document title tests...\n")

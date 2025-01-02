@@ -1,6 +1,6 @@
 """Unit tests for settings management."""
 import pytest
-from rag_backend.config.dynamic_settings import (
+from src.config.dynamic_settings import (
     LLMSettings,
     DocumentProcessingSettings,
     ResponseSettings,

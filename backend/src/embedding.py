@@ -2,7 +2,7 @@ import os
 import time
 import logging
 from sentence_transformers import SentenceTransformer
-from rag_backend.config.settings import EMBEDDING_MODEL_NAME
+from config.settings import EMBEDDING_MODEL_NAME
 
 logger = logging.getLogger(__name__)
 

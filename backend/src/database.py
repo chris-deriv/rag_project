@@ -1,7 +1,7 @@
 """Vector database management with ChromaDB."""
 import chromadb
 from chromadb.config import Settings
-from rag_backend.config.settings import CHROMA_COLLECTION_NAME, CHROMA_PERSIST_DIR
+from config.settings import CHROMA_COLLECTION_NAME, CHROMA_PERSIST_DIR
 from typing import List, Dict, Any, Optional, Union
 import numpy as np
 import logging

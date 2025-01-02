@@ -1,6 +1,6 @@
 import unittest
 from unittest.mock import Mock, patch, call
-from rag_backend.chatbot import Chatbot
+from src.chatbot import Chatbot
 
 class TestChatbot(unittest.TestCase):
     def setUp(self):

@@ -1,6 +1,6 @@
-from rag_backend.search import SearchEngine
-from rag_backend.database import VectorDatabase
-from rag_backend.documents import DocumentProcessor
+from src.search import SearchEngine
+from src.database import VectorDatabase
+from src.documents import DocumentProcessor
 import numpy as np
 
 def test_similarity_search():

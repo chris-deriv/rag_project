@@ -1,9 +1,9 @@
 import unittest
 import numpy as np
 from unittest.mock import Mock, patch
-from rag_backend.search import SearchEngine
+from src.search import SearchEngine
 
-@patch('rag_backend.database.VectorDatabase')
+@patch('src.database.VectorDatabase')
 class TestSearchEngine(unittest.TestCase):
     def setUp(self):
         """Set up test fixtures before each test method."""
@@ -32,12 +32,12 @@ class TestSearchEngine(unittest.TestCase):
         """Test query embedding generation."""
         # Test successful embedding generation
         mock_embeddings = np.array([0.1, 0.2, 0.3])
-        with patch('rag_backend.embedding.EmbeddingGenerator.generate_embeddings', return_value=np.array([mock_embeddings])):
+        with patch('src.embedding.EmbeddingGenerator.generate_embeddings', return_value=np.array([mock_embeddings])):
             result = self.search_engine.generate_query_embedding("test query")
             np.testing.assert_array_equal(result, mock_embeddings)
 
         # Test embedding error
-        with patch('rag_backend.embedding.EmbeddingGenerator.generate_embeddings', side_effect=Exception("Embedding error")):
+        with patch('src.embedding.EmbeddingGenerator.generate_embeddings', side_effect=Exception("Embedding error")):
             with self.assertRaises(Exception) as context:
                 self.search_engine.generate_query_embedding("test query")
             self.assertIn("Embedding error", str(context.exception))
