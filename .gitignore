@@ -64,3 +64,5 @@ ENV/
 /data/**/*
 backend/model_cache/
 backend/src/model_cache/
+backend/test_db/
+**/chroma.sqlite3
