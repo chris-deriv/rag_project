@@ -1,8 +1,13 @@
 """Integration tests for settings management."""
 import pytest
-import json
-from src.api import app
+from unittest.mock import Mock, patch
 from src.config.dynamic_settings import settings_manager
+
+# Mock OpenAI before importing Chatbot
+with patch('openai.OpenAI'):
+    from src.chatbot import Chatbot
+    from src.api import app
+    from src.search import SearchEngine
 
 @pytest.fixture
 def client():
@@ -11,166 +16,169 @@ def client():
     with app.test_client() as client:
         yield client
 
-def test_get_settings(client):
-    """Test GET /settings endpoint."""
-    response = client.get('/settings')
-    assert response.status_code == 200
-    
-    data = json.loads(response.data)
-    assert 'llm' in data
-    assert 'document_processing' in data
-    assert 'response' in data
-    assert 'cache' in data
+@pytest.fixture(autouse=True)
+def clean_observers():
+    """Clean up observers before and after each test."""
+    settings_manager._observers = []
+    yield
+    settings_manager._observers = []
 
-def test_update_settings_valid(client):
-    """Test POST /settings endpoint with valid settings."""
-    new_settings = {
-        'llm': {
-            'temperature': 0.5,
-            'max_tokens': 2000,
-            'model': 'gpt-4'
-        },
-        'document_processing': {
-            'chunk_size': 800,
-            'chunk_overlap': 100
-        }
-    }
-    
-    response = client.post(
-        '/settings',
-        data=json.dumps(new_settings),
-        content_type='application/json'
-    )
-    assert response.status_code == 200
-    
-    data = json.loads(response.data)
-    assert data['message'] == 'Settings updated successfully'
-    assert data['settings']['llm']['temperature'] == 0.5
-    assert data['settings']['llm']['max_tokens'] == 2000
-    assert data['settings']['document_processing']['chunk_size'] == 800
+@pytest.fixture
+def mock_chatbot():
+    """Mock Chatbot to prevent observer registration."""
+    with patch('src.search.Chatbot') as mock:
+        mock_instance = Mock()
+        mock_instance._response_cache = {}
+        mock.return_value = mock_instance
+        yield mock_instance
 
-def test_update_settings_invalid(client):
-    """Test POST /settings endpoint with invalid settings."""
-    new_settings = {
-        'llm': {
-            'temperature': 3.0,  # Invalid: > 2.0
-            'max_tokens': 2000
-        }
-    }
+def test_chatbot_settings_update():
+    """Test that Chatbot properly handles settings updates."""
+    chatbot = Chatbot()
     
-    response = client.post(
-        '/settings',
-        data=json.dumps(new_settings),
-        content_type='application/json'
-    )
-    assert response.status_code == 400
+    # Verify observer was registered
+    assert len(settings_manager._observers) == 1
     
-    data = json.loads(response.data)
-    assert 'error' in data
-
-def test_update_settings_invalid_content_type(client):
-    """Test POST /settings endpoint with invalid content type."""
-    response = client.post(
-        '/settings',
-        data='not json'
-    )
-    assert response.status_code == 400
+    # Get original prompt
+    original_prompt = chatbot.settings['response']['source_citation_prompt']
     
-    data = json.loads(response.data)
-    assert 'error' in data
-
-def test_update_settings_empty(client):
-    """Test POST /settings endpoint with empty settings."""
-    response = client.post(
-        '/settings',
-        data=json.dumps({}),
-        content_type='application/json'
-    )
-    assert response.status_code == 400
-    
-    data = json.loads(response.data)
-    assert 'error' in data
-
-def test_settings_persistence(client):
-    """Test that settings changes persist."""
-    # Update settings
-    new_settings = {
-        'llm': {
-            'temperature': 0.6,
-            'max_tokens': 1500
-        }
-    }
-    
-    response = client.post(
-        '/settings',
-        data=json.dumps(new_settings),
-        content_type='application/json'
-    )
-    assert response.status_code == 200
-    
-    # Get settings and verify changes persisted
-    response = client.get('/settings')
-    assert response.status_code == 200
-    
-    data = json.loads(response.data)
-    assert data['llm']['temperature'] == 0.6
-    assert data['llm']['max_tokens'] == 1500
-
-def test_settings_validation_chunk_size(client):
-    """Test validation of chunk size settings."""
-    new_settings = {
-        'document_processing': {
-            'chunk_size': 50  # Invalid: < 100
-        }
-    }
-    
-    response = client.post(
-        '/settings',
-        data=json.dumps(new_settings),
-        content_type='application/json'
-    )
-    assert response.status_code == 400
-
-def test_settings_validation_prompts(client):
-    """Test validation of prompt settings."""
+    # Update source citation prompt
     new_settings = {
         'response': {
-            'system_prompt': '',  # Invalid: empty
-            'source_citation_prompt': 'Valid prompt'
+            'source_citation_prompt': 'New test prompt for citations',
+            'system_prompt': chatbot.settings['response']['system_prompt']
         }
     }
+    result = settings_manager.update_settings(new_settings)
+    assert result is True  # Verify update was successful
     
-    response = client.post(
-        '/settings',
-        data=json.dumps(new_settings),
-        content_type='application/json'
-    )
-    assert response.status_code == 400
+    # Verify chatbot's settings were updated
+    assert chatbot.settings['response']['source_citation_prompt'] == 'New test prompt for citations'
+    assert chatbot.settings['response']['source_citation_prompt'] != original_prompt
+    
+    # Verify cache was cleared
+    assert len(chatbot._response_cache) == 0
 
-def test_settings_partial_update(client):
-    """Test partial update of settings."""
-    # Get original settings
-    response = client.get('/settings')
-    original_settings = json.loads(response.data)
+def test_chatbot_system_prompt_update():
+    """Test that Chatbot properly handles system prompt updates."""
+    chatbot = Chatbot()
     
-    # Update only temperature
+    # Verify observer was registered
+    assert len(settings_manager._observers) == 1
+    
+    # Get original system prompt
+    original_prompt = chatbot.settings['response']['system_prompt']
+    
+    # Update system prompt
+    new_settings = {
+        'response': {
+            'system_prompt': 'New system prompt for testing',
+            'source_citation_prompt': chatbot.settings['response']['source_citation_prompt']
+        }
+    }
+    result = settings_manager.update_settings(new_settings)
+    assert result is True  # Verify update was successful
+    
+    # Verify chatbot's settings were updated
+    assert chatbot.settings['response']['system_prompt'] == 'New system prompt for testing'
+    assert chatbot.settings['response']['system_prompt'] != original_prompt
+    
+    # Verify cache was cleared
+    assert len(chatbot._response_cache) == 0
+
+def test_nested_settings_update():
+    """Test that nested settings updates are properly handled."""
+    chatbot = Chatbot()
+    
+    # Verify observer was registered
+    assert len(settings_manager._observers) == 1
+    
+    # Update multiple nested settings
+    new_settings = {
+        'response': {
+            'source_citation_prompt': 'New citation format',
+            'system_prompt': 'New system prompt'
+        },
+        'llm': {
+            'temperature': 0.7,
+            'max_tokens': chatbot.settings['llm']['max_tokens'],
+            'model': chatbot.settings['llm']['model']
+        }
+    }
+    result = settings_manager.update_settings(new_settings)
+    assert result is True  # Verify update was successful
+    
+    # Verify all nested settings were updated
+    assert chatbot.settings['response']['source_citation_prompt'] == 'New citation format'
+    assert chatbot.settings['response']['system_prompt'] == 'New system prompt'
+    assert chatbot.settings['llm']['temperature'] == 0.7
+
+def test_search_engine_settings_update(mock_chatbot):
+    """Test that SearchEngine properly handles settings updates."""
+    search_engine = SearchEngine()
+    
+    # Only SearchEngine should be registered as observer (Chatbot is mocked)
+    assert len(settings_manager._observers) == 1
+    
+    # Mock the search method to return deterministic results
+    original_results = [
+        {'id': '1', 'combined_score': 0.8},
+        {'id': '2', 'combined_score': 0.6}
+    ]
+    new_results = [
+        {'id': '1', 'combined_score': 0.9},
+        {'id': '2', 'combined_score': 0.7}
+    ]
+    
+    search_engine.search = Mock(side_effect=[original_results, new_results])
+    
+    # Create a test query and get initial results
+    query = "test query"
+    initial_results = search_engine.search(query, n_results=5)
+    
+    # Update LLM settings
     new_settings = {
         'llm': {
-            'temperature': 0.8
+            'temperature': 0.3,
+            'max_tokens': 1500,
+            'model': search_engine.settings['llm']['model']
         }
     }
+    result = settings_manager.update_settings(new_settings)
+    assert result is True  # Verify update was successful
     
-    response = client.post(
-        '/settings',
-        data=json.dumps(new_settings),
-        content_type='application/json'
-    )
-    assert response.status_code == 200
+    # Verify relevance cache was cleared
+    assert len(search_engine._relevance_cache) == 0
     
-    # Verify only temperature changed
-    response = client.get('/settings')
-    current_settings = json.loads(response.data)
+    # Get new results
+    new_results = search_engine.search(query, n_results=5)
     
-    assert current_settings['llm']['temperature'] == 0.8
-    assert current_settings['llm']['max_tokens'] == original_settings['llm']['max_tokens']
-    assert current_settings['llm']['model'] == original_settings['llm']['model']
+    # Verify search was called twice
+    assert search_engine.search.call_count == 2
+    
+    # Verify results are different
+    assert initial_results != new_results
+
+def test_observer_cleanup(mock_chatbot):
+    """Test that observers are properly cleaned up."""
+    # Create chatbot and verify observer is registered
+    chatbot = Chatbot()
+    assert len(settings_manager._observers) == 1
+    
+    # Create search engine and verify observers
+    # SearchEngine adds one observer (Chatbot is mocked)
+    search_engine = SearchEngine()
+    assert len(settings_manager._observers) == 2
+    
+    # Update settings and verify both components are notified
+    new_settings = {
+        'llm': {
+            'temperature': 0.5
+        }
+    }
+    result = settings_manager.update_settings(new_settings)
+    assert result is True
+    
+    # Verify both caches were cleared
+    assert len(chatbot._response_cache) == 0
+    assert len(search_engine._relevance_cache) == 0

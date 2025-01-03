@@ -54,48 +54,6 @@ def mock_chroma_client():
     # Return both mocks as expected by the tests
     return mock_client, mock_collection
 
-# Mock settings with default values
-@pytest.fixture(autouse=True)
-def mock_settings(monkeypatch):
-    """Mock settings for testing."""
-    mock_llm_settings = {
-        'temperature': 0.3,
-        'max_tokens': 1000,
-        'model': 'gpt-3.5-turbo'
-    }
-    
-    mock_doc_settings = {
-        'chunk_size': 500,
-        'chunk_overlap': 50
-    }
-    
-    mock_cache_settings = {
-        'enabled': True,
-        'size': 1000
-    }
-    
-    # Mock the settings imports
-    monkeypatch.setattr(
-        'src.config.dynamic_settings.LLM_SETTINGS',
-        mock_llm_settings
-    )
-    monkeypatch.setattr(
-        'src.config.dynamic_settings.DOCUMENT_PROCESSING_SETTINGS',
-        mock_doc_settings
-    )
-    monkeypatch.setattr(
-        'src.config.dynamic_settings.CACHE_SETTINGS',
-        mock_cache_settings
-    )
-    monkeypatch.setattr(
-        'src.config.dynamic_settings.BASIC_SYSTEM_PROMPT',
-        'Test system prompt'
-    )
-    monkeypatch.setattr(
-        'src.config.dynamic_settings.SOURCE_CITATION_PROMPT',
-        'Test citation prompt'
-    )
-
 @pytest.fixture
 def mock_openai_client(monkeypatch):
     """Mock OpenAI client."""

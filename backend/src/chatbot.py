@@ -1,8 +1,12 @@
 from typing import List
 import httpx
 from openai import OpenAI
-from config.settings import OPENAI_API_KEY
-from config.dynamic_settings import settings_manager
+import copy
+import logging
+from src.config.settings import OPENAI_API_KEY
+from src.config.dynamic_settings import settings_manager
+
+logger = logging.getLogger(__name__)
 
 class Chatbot:
     def __init__(self):
@@ -13,10 +17,12 @@ class Chatbot:
             http_client=http_client
         )
         # Get initial settings
-        self.settings = settings_manager.get_all_settings()
+        self.settings = copy.deepcopy(settings_manager.get_all_settings())
         
         # Register as observer for settings changes
+        logger.info("Registering chatbot as settings observer")
         settings_manager.add_observer(self._handle_settings_change)
+        logger.info(f"Current settings observers: {len(settings_manager._observers)}")
         
         # Cache for storing responses
         self._response_cache = {}
@@ -24,9 +30,12 @@ class Chatbot:
     def _handle_settings_change(self, setting_name: str, new_value: dict) -> None:
         """Handle settings changes from the settings manager."""
         if setting_name in ['llm', 'response']:
-            self.settings[setting_name] = new_value
+            logger.info(f"Chatbot received settings update - {setting_name}: {new_value}")
+            # Get fresh settings from manager to ensure we have the latest state
+            self.settings = copy.deepcopy(settings_manager.get_all_settings())
             # Clear cache when settings change
             self._response_cache.clear()
+            logger.info("Response cache cleared")
 
     def _get_cache_key(self, context: str, query: str) -> str:
         """Generate a deterministic cache key for responses."""
