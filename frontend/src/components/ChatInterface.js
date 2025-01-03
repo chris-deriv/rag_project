@@ -69,6 +69,47 @@ const ChatInterface = ({ selectedDocuments, onDocumentDelete }) => {
       .replace(/~/g, '\\textasciitilde{}');
   };
 
+  const markdownToLatex = (markdown) => {
+    let latex = markdown;
+    
+    // Convert markdown code blocks to LaTeX listings
+    latex = latex.replace(/```(\w+)?\n([\s\S]*?)```/g, (_, lang, code) => {
+      return `\\begin{lstlisting}[language=${lang || 'text'}]\n${code}\n\\end{lstlisting}`;
+    });
+
+    // Convert markdown inline code to LaTeX texttt
+    latex = latex.replace(/`([^`]+)`/g, '\\texttt{$1}');
+
+    // Convert markdown bold to LaTeX textbf
+    latex = latex.replace(/\*\*([^*]+)\*\*/g, '\\textbf{$1}');
+
+    // Convert markdown italic to LaTeX textit
+    latex = latex.replace(/\*([^*]+)\*/g, '\\textit{$1}');
+
+    // Convert markdown lists to LaTeX itemize
+    latex = latex.replace(/(?:^|\n)((?:[ ]*[-*+][ ].+\n?)+)/g, (_, list) => {
+      const items = list.trim().split('\n').map(item => 
+        `  \\item ${item.replace(/^[ ]*[-*+][ ]/, '')}`
+      ).join('\n');
+      return `\\begin{itemize}\n${items}\n\\end{itemize}\n`;
+    });
+
+    // Convert markdown headers to LaTeX sections
+    latex = latex.replace(/^#{1,6}\s+(.+)$/gm, (match, title) => {
+      const level = match.trim().indexOf(' ');
+      const sections = ['section', 'subsection', 'subsubsection', 'paragraph', 'subparagraph'];
+      return `\\${sections[Math.min(level - 1, sections.length - 1)]}*{${title}}`;
+    });
+
+    // Convert markdown math blocks to LaTeX display math
+    latex = latex.replace(/\$\$(.*?)\$\$/g, '\\[\n$1\n\\]');
+
+    // Convert markdown inline math to LaTeX inline math
+    latex = latex.replace(/\$([^$]+)\$/g, '\\($1\\)');
+
+    return latex;
+  };
+
   const convertToLatex = () => {
     // LaTeX document preamble
     let latexContent = `\\documentclass{article}
@@ -78,11 +119,21 @@ const ChatInterface = ({ selectedDocuments, onDocumentDelete }) => {
 \\usepackage{xcolor}
 \\usepackage{geometry}
 \\usepackage{listings}
+\\usepackage{hyperref}
 \\geometry{margin=1in}
 
 \\definecolor{userColor}{RGB}{25,118,210}
 \\definecolor{assistantColor}{RGB}{66,66,66}
 \\definecolor{errorColor}{RGB}{211,47,47}
+
+\\lstset{
+  basicstyle=\\ttfamily\\small,
+  breaklines=true,
+  frame=single,
+  numbers=left,
+  numberstyle=\\tiny,
+  showstringspaces=false
+}
 
 \\begin{document}
 \\section*{Chat Conversation}
@@ -109,7 +160,7 @@ const ChatInterface = ({ selectedDocuments, onDocumentDelete }) => {
       latexContent += `\\begin{quote}
 \\textcolor{${roleColor}}{\\textbf{${role}:}}
 
-${escapeLatex(message.content)}
+${markdownToLatex(message.content)}
 \\end{quote}
 
 `;
