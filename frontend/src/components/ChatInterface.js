@@ -67,6 +67,7 @@ const ChatInterface = ({ selectedDocuments, onDocumentDelete }) => {
   };
 
   const escapeLatex = (text) => {
+    if (!text) return '';  // Return empty string for undefined/null input
     return text
       .replace(/\\/g, '\\textbackslash{}')
       .replace(/[&%$#_{}]/g, '\\$&')
@@ -75,6 +76,7 @@ const ChatInterface = ({ selectedDocuments, onDocumentDelete }) => {
   };
 
   const markdownToLatex = (markdown) => {
+    if (!markdown) return '';  // Return empty string for undefined/null input
     let latex = markdown;
     
     // Convert markdown code blocks to LaTeX listings
@@ -94,9 +96,9 @@ const ChatInterface = ({ selectedDocuments, onDocumentDelete }) => {
     // Convert markdown lists to LaTeX itemize
     latex = latex.replace(/(?:^|\n)((?:[ ]*[-*+][ ].+\n?)+)/g, (_, list) => {
       const items = list.trim().split('\n').map(item => 
-        `  \\item ${item.replace(/^[ ]*[-*+][ ]/, '')}`
+        `\\item ${item.replace(/^[ ]*[-*+][ ]/, '')}`
       ).join('\n');
-      return `\\begin{itemize}\n${items}\n\\end{itemize}\n`;
+      return `\\begin{itemize}${items}\\end{itemize}`;
     });
 
     // Convert markdown headers to LaTeX sections
@@ -110,6 +112,8 @@ const ChatInterface = ({ selectedDocuments, onDocumentDelete }) => {
   };
 
   const renderLatexMessage = (content) => {
+    if (!content) return null;  // Return null for undefined/null input
+    
     // Split content by math delimiters
     const parts = content.split(/(\$\$[\s\S]*?\$\$|\$[^\$]*\$)/g);
     
@@ -131,16 +135,104 @@ const ChatInterface = ({ selectedDocuments, onDocumentDelete }) => {
           return <span key={index}>{math}</span>;
         }
       } else {
-        // Regular text - convert markdown except math
+        // Regular LaTeX content - style it like a rendered document
         const processedText = markdownToLatex(part);
-        return <span key={index}>{processedText}</span>;
+        return (
+          <Paper
+            key={index}
+            elevation={1}
+            sx={{
+              padding: '1rem 1rem',
+              color: '#000',
+              backgroundColor: '#f8f8f8',
+              fontFamily: 'Arial, sans-serif',
+              fontSize: '1rem',
+              lineHeight: '1.6',
+              textAlign: 'justify',
+              maxWidth: '100%',
+              margin: '1rem 0',
+              boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
+              '& h2': {
+                fontFamily: 'Arial, sans-serif',
+                color: '#000',
+                borderBottom: '1px solid #ddd',
+                paddingBottom: '0.25rem',
+                marginBottom: '1rem',
+                fontSize: '1.75rem'
+              },
+              '& h3': {
+                fontFamily: 'Arial, sans-serif',
+                color: '#000',
+                marginTop: '0.25rem',
+                marginBottom: '0.25rem',
+                fontSize: '1.5rem'
+              },
+              '& ul': {
+                marginTop: 0,
+                marginLeft: '1.5rem',
+                paddingLeft: '1rem',
+                marginBottom: '0.5rem'
+              },
+              '& li': {
+                marginBottom: '0.25rem',
+                position: 'relative'
+              },
+              '& strong': {
+                fontWeight: 600,
+                color: '#000'
+              },
+              '& em': {
+                fontStyle: 'italic',
+                color: '#000'
+              }
+            }}
+            component="div"
+            dangerouslySetInnerHTML={{
+              __html: processedText
+                // Basic LaTeX to HTML conversion for common elements
+                .replace(/\\textbf{([^}]+)}/g, '<strong>$1</strong>')
+                .replace(/\\textit{([^}]+)}/g, '<em>$1</em>')
+                .replace(/\\begin{itemize}/g, '<ul style="margin: 0.25rem; padding-left: 1.5rem;">')
+                .replace(/\\end{itemize}/g, '</ul>')
+                .replace(/\\item\s*/g, '<li style="margin-bottom: 0.25rem;">')
+                .replace(/\n\n/g, '<div style="margin: 0.75rem 0;"></div>')
+                .replace(/\\section\*{([^}]+)}/g, '<h2 style="margin: 0.5rem 0;">$1</h2>')
+                .replace(/\\subsection\*{([^}]+)}/g, '<h3 style="margin: 0.25rem 0;">$1</h3>')
+            }}
+          />
+        );
       }
     });
   };
 
-  const convertToLatex = () => {
-    // LaTeX document preamble
-    let latexContent = `\\documentclass{article}
+  const convertToLatex = (singleMessage = null) => {
+    if (singleMessage) {
+      // For single message export, only include the message content
+      return `\\documentclass{article}
+\\usepackage{amsmath}
+\\usepackage{amssymb}
+\\usepackage{graphicx}
+\\usepackage{listings}
+\\usepackage{hyperref}
+\\geometry{margin=1in}
+
+\\lstset{
+  basicstyle=\\ttfamily\\small,
+  breaklines=true,
+  frame=single,
+  numbers=left,
+  numberstyle=\\tiny,
+  showstringspaces=false
+}
+
+\\begin{document}
+
+${markdownToLatex(singleMessage.content)}
+
+\\end{document}`;
+    } else {
+      // For full conversation export
+      let latexContent = `\\documentclass{article}
 \\usepackage{amsmath}
 \\usepackage{amssymb}
 \\usepackage{graphicx}
@@ -168,24 +260,28 @@ const ChatInterface = ({ selectedDocuments, onDocumentDelete }) => {
 
 `;
 
-    // Add selected documents
-    if (selectedDocuments.length > 0) {
-      latexContent += "\\subsection*{Selected Documents}\n\\begin{itemize}\n";
-      selectedDocuments.forEach(doc => {
-        latexContent += `\\item ${escapeLatex(doc.source_name)}\n`;
-      });
-      latexContent += "\\end{itemize}\n\\vspace{1em}\n";
-    }
+      // Add selected documents
+      if (selectedDocuments.length > 0) {
+        latexContent += "\\subsection*{Selected Documents}\n\\begin{itemize}\n";
+        selectedDocuments.forEach(doc => {
+          latexContent += `\\item ${escapeLatex(doc.source_name)}\n`;
+        });
+        latexContent += "\\end{itemize}\n\\vspace{1em}\n";
+      }
 
-    // Convert messages to LaTeX format
-    messages.forEach(message => {
-      const roleColor = message.type === 'user' ? 'userColor' : 
-                       message.type === 'error' ? 'errorColor' : 
-                       'assistantColor';
-      
-      const role = message.type.charAt(0).toUpperCase() + message.type.slice(1);
-      
-      latexContent += `\\begin{quote}
+      // Convert all messages to LaTeX format
+      if (messages && messages.length > 0) {
+        messages.forEach(message => {
+          if (!message || !message.content) return;  // Skip invalid messages
+          
+          const roleColor = message.type === 'user' ? 'userColor' : 
+                           message.type === 'error' ? 'errorColor' : 
+                           'assistantColor';
+          
+          const role = (message.type || 'unknown').charAt(0).toUpperCase() + 
+                      (message.type || 'unknown').slice(1);
+          
+          latexContent += `\\begin{quote}
 \\textcolor{${roleColor}}{\\textbf{${role}:}}
 
 ${markdownToLatex(message.content)}
@@ -193,30 +289,69 @@ ${markdownToLatex(message.content)}
 
 `;
 
-      if (message.details) {
-        latexContent += `\\begin{quote}
+          if (message.details) {
+            latexContent += `\\begin{quote}
 \\textcolor{errorColor}{\\small ${escapeLatex(message.details)}}
 \\end{quote}
 
 `;
+          }
+        });
       }
-    });
 
-    latexContent += "\\end{document}";
-    return latexContent;
+      latexContent += "\\end{document}";
+      return latexContent;
+    }
   };
 
-  const handleExport = () => {
-    const latexContent = convertToLatex();
-    const blob = new Blob([latexContent], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'chat_conversation.tex';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+  const handleExport = (message = null) => {
+    // Log export request details
+    console.log('Export requested:', { 
+      type: message ? 'single_message' : 'full_conversation',
+      messageType: message?.type,
+      messagesCount: messages?.length,
+      validMessages: messages?.filter(m => m.content)?.length
+    });
+
+    // For single message export
+    if (message) {
+      if (!message.content) {
+        console.log('Skipping export: Single message has no content');
+        return;
+      }
+      if (message.type !== 'assistant') {
+        console.log('Skipping export: Not an assistant message');
+        return;
+      }
+      console.log('Proceeding with single message export');
+    }
+    // For full conversation export
+    else {
+      const validMessages = messages?.filter(m => m.content)?.length || 0;
+      if (validMessages === 0) {
+        console.log('Skipping export: No valid messages in conversation');
+        return;
+      }
+      console.log('Proceeding with full conversation export');
+    }
+
+    try {
+      console.log('Creating LaTeX content');
+      const latexContent = convertToLatex(message);
+      console.log('Creating download link');
+      const blob = new Blob([latexContent], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = message ? 'response.tex' : 'chat_conversation.tex';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      console.log('Export completed');
+    } catch (error) {
+      console.error('Export failed:', error);
+    }
   };
 
   const getNoDocumentsMessage = () => {
@@ -230,42 +365,66 @@ ${markdownToLatex(message.content)}
     return null;
   };
 
+  const renderMessage = (message) => {
+    if (viewMode === 'latex' && message.type === 'assistant') {
+      return renderLatexMessage(message.content);
+    }
+    return message.content;
+  };
+
   return (
     <Paper elevation={3} sx={{ p: 3, height: '100%', display: 'flex', flexDirection: 'column' }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
         <Typography variant="h6" component="h2">
           Chat
         </Typography>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-          <Tabs
-            value={viewMode}
-            onChange={(_, newValue) => setViewMode(newValue)}
-            sx={{ minHeight: 0 }}
-          >
-            <Tab 
-              label="Markdown" 
-              value="markdown"
-              sx={{ 
-                minHeight: 0,
-                py: 1
-              }}
-            />
-            <Tab 
-              label="LaTeX Preview" 
-              value="latex"
-              sx={{ 
-                minHeight: 0,
-                py: 1
-              }}
-            />
-          </Tabs>
-          {messages.length > 0 && (
-            <Tooltip title="Export as LaTeX">
-              <IconButton onClick={handleExport} color="primary">
-                <DownloadIcon />
-              </IconButton>
-            </Tooltip>
-          )}
+        <Box sx={{ display: 'flex', alignItems: 'center' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', bgcolor: 'background.paper', borderRadius: 1 }}>
+            <Tabs
+              value={viewMode}
+              onChange={(_, newValue) => setViewMode(newValue)}
+              sx={{ minHeight: 0 }}
+            >
+              <Tab 
+                label="Markdown" 
+                value="markdown"
+                sx={{ 
+                  minHeight: 0,
+                  py: 1
+                }}
+              />
+              <Tab 
+                label="LaTeX Preview" 
+                value="latex"
+                sx={{ 
+                  minHeight: 0,
+                  py: 1,
+                  mr: 0
+                }}
+              />
+            </Tabs>
+            {messages.length > 0 && viewMode === 'latex' && (
+              <Tooltip title="Export as LaTeX Document">
+                <IconButton 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleExport(null);
+                  }} 
+                  color="primary"
+                  size="small"
+                  sx={{
+                    ml: 1,
+                    mr: 0.5,
+                    '&:hover': {
+                      backgroundColor: 'rgba(0, 0, 0, 0.04)',
+                    }
+                  }}
+                >
+                  <DownloadIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            )}
+          </Box>
         </Box>
       </Box>
 
@@ -293,7 +452,7 @@ ${markdownToLatex(message.content)}
           flex: 1,
           mb: 2,
           overflowY: 'auto',
-          bgcolor: 'background.default',
+          bgcolor: viewMode === 'latex' ? '#fff' : 'background.default',
           borderRadius: 1,
           p: 2,
           border: '1px solid',
@@ -312,32 +471,57 @@ ${markdownToLatex(message.content)}
           >
             <Box
               sx={{
-                maxWidth: '80%',
+                maxWidth: message.type === 'user' ? '80%' : '100%',
                 p: 2,
                 borderRadius: 2,
-                bgcolor: message.type === 'user' 
-                  ? 'primary.main' 
-                  : message.type === 'error' 
+                bgcolor: message.type === 'user'
+                  ? 'primary.main'
+                  : message.type === 'error'
                     ? 'error.light'
                     : 'background.paper',
-                color: message.type === 'user' 
-                  ? 'primary.contrastText' 
+                color: message.type === 'user'
+                  ? 'primary.contrastText'
                   : message.type === 'error'
                     ? 'error.contrastText'
                     : 'text.primary',
                 border: message.type !== 'user' ? '1px solid' : 'none',
-                borderColor: message.type === 'error' ? 'error.main' : 'divider'
+                borderColor: message.type === 'error' ? 'error.main' : 'divider',
+                width: message.type === 'user' ? 'auto' : '100%'
               }}
             >
-              <Typography
-                variant="body1"
-                component="div"
-                sx={{ whiteSpace: 'pre-wrap' }}
-              >
-                {viewMode === 'markdown' ? 
-                  message.content : 
-                  renderLatexMessage(message.content)}
-              </Typography>
+              <Box sx={{ position: 'relative', width: '100%' }}>
+                <Typography
+                  variant="body1"
+                  component="div"
+                  sx={{ whiteSpace: 'pre-wrap' }}
+                >
+                  {renderMessage(message)}
+                </Typography>
+                {message.type === 'assistant' && viewMode === 'latex' && (
+                  <Tooltip title="Export Message as LaTeX">
+                    <IconButton
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleExport(message);
+                      }}
+                      color="primary"
+                      size="small"
+                      sx={{
+                        position: 'absolute',
+                        top: '-0.5rem',
+                        right: '-0.5rem',
+                        backgroundColor: 'background.paper',
+                        boxShadow: 1,
+                        '&:hover': {
+                          backgroundColor: 'background.paper',
+                        }
+                      }}
+                    >
+                      <DownloadIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                )}
+              </Box>
               {message.details && (
                 <Typography
                   variant="caption"
