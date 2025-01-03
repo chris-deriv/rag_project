@@ -10,11 +10,15 @@ import {
   Chip,
   Alert,
   IconButton,
-  Tooltip
+  Tooltip,
+  Tabs,
+  Tab
 } from '@mui/material';
 import SendIcon from '@mui/icons-material/Send';
 import DownloadIcon from '@mui/icons-material/Download';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
+import 'katex/dist/katex.min.css';
+import { InlineMath, BlockMath } from 'react-katex';
 import api from '../api';
 
 const ChatInterface = ({ selectedDocuments, onDocumentDelete }) => {
@@ -22,6 +26,7 @@ const ChatInterface = ({ selectedDocuments, onDocumentDelete }) => {
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [viewMode, setViewMode] = useState('markdown'); // 'markdown' or 'latex'
   const messagesEndRef = useRef(null);
 
   const scrollToBottom = () => {
@@ -30,7 +35,7 @@ const ChatInterface = ({ selectedDocuments, onDocumentDelete }) => {
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages]);
+  }, [messages, viewMode]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -101,13 +106,36 @@ const ChatInterface = ({ selectedDocuments, onDocumentDelete }) => {
       return `\\${sections[Math.min(level - 1, sections.length - 1)]}*{${title}}`;
     });
 
-    // Convert markdown math blocks to LaTeX display math
-    latex = latex.replace(/\$\$(.*?)\$\$/g, '\\[\n$1\n\\]');
-
-    // Convert markdown inline math to LaTeX inline math
-    latex = latex.replace(/\$([^$]+)\$/g, '\\($1\\)');
-
     return latex;
+  };
+
+  const renderLatexMessage = (content) => {
+    // Split content by math delimiters
+    const parts = content.split(/(\$\$[\s\S]*?\$\$|\$[^\$]*\$)/g);
+    
+    return parts.map((part, index) => {
+      if (part.startsWith('$$') && part.endsWith('$$')) {
+        // Display math
+        const math = part.slice(2, -2);
+        try {
+          return <BlockMath key={index} math={math} />;
+        } catch (e) {
+          return <pre key={index}>{math}</pre>;
+        }
+      } else if (part.startsWith('$') && part.endsWith('$')) {
+        // Inline math
+        const math = part.slice(1, -1);
+        try {
+          return <InlineMath key={index} math={math} />;
+        } catch (e) {
+          return <span key={index}>{math}</span>;
+        }
+      } else {
+        // Regular text - convert markdown except math
+        const processedText = markdownToLatex(part);
+        return <span key={index}>{processedText}</span>;
+      }
+    });
   };
 
   const convertToLatex = () => {
@@ -208,13 +236,37 @@ ${markdownToLatex(message.content)}
         <Typography variant="h6" component="h2">
           Chat
         </Typography>
-        {messages.length > 0 && (
-          <Tooltip title="Export as LaTeX">
-            <IconButton onClick={handleExport} color="primary">
-              <DownloadIcon />
-            </IconButton>
-          </Tooltip>
-        )}
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <Tabs
+            value={viewMode}
+            onChange={(_, newValue) => setViewMode(newValue)}
+            sx={{ minHeight: 0 }}
+          >
+            <Tab 
+              label="Markdown" 
+              value="markdown"
+              sx={{ 
+                minHeight: 0,
+                py: 1
+              }}
+            />
+            <Tab 
+              label="LaTeX Preview" 
+              value="latex"
+              sx={{ 
+                minHeight: 0,
+                py: 1
+              }}
+            />
+          </Tabs>
+          {messages.length > 0 && (
+            <Tooltip title="Export as LaTeX">
+              <IconButton onClick={handleExport} color="primary">
+                <DownloadIcon />
+              </IconButton>
+            </Tooltip>
+          )}
+        </Box>
       </Box>
 
       {getNoDocumentsMessage()}
@@ -282,7 +334,9 @@ ${markdownToLatex(message.content)}
                 component="div"
                 sx={{ whiteSpace: 'pre-wrap' }}
               >
-                {message.content}
+                {viewMode === 'markdown' ? 
+                  message.content : 
+                  renderLatexMessage(message.content)}
               </Typography>
               {message.details && (
                 <Typography
