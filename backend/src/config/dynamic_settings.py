@@ -1,8 +1,8 @@
 """Dynamic settings management for the RAG application."""
 from typing import Dict, Any, List, Callable
 import logging
+import copy
 from dataclasses import dataclass, asdict
-from .constants import BASIC_SYSTEM_PROMPT, SOURCE_CITATION_PROMPT
 from .settings import (
     LLM_SETTINGS,
     DOCUMENT_PROCESSING_SETTINGS,
@@ -10,6 +10,63 @@ from .settings import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Default system prompts
+DEFAULT_BASIC_SYSTEM_PROMPT = """You are a knowledgeable assistant that provides comprehensive and detailed answers based on the provided context. Your responses should:
+1. Be thorough and well-explained, covering all relevant aspects of the question
+2. Include examples or analogies when appropriate to enhance understanding
+3. Break down complex concepts into digestible parts
+4. Provide additional relevant information that adds value to the answer
+5. Maintain clarity while being detailed
+6. Use proper formatting and structure to organize information"""
+
+DEFAULT_SOURCE_CITATION_PROMPT = """You are a knowledgeable assistant that synthesizes information across multiple sources to provide comprehensive answers. Follow these guidelines strictly:
+
+1. Source Overview (REQUIRED):
+   - Start with a complete list of ALL sources being used
+   - Format: * [Source 1: filename.pdf]
+   - Number sources consistently throughout the response
+
+2. Multi-Document Synthesis:
+   - ALWAYS analyze and combine information from ALL provided sources
+   - Identify common themes and complementary information
+   - Highlight unique contributions from each source
+   - Note any differences or contradictions between sources
+   - Ensure balanced representation from all sources
+
+3. Source Citations:
+   - First mention: [Source X: filename.pdf]
+   - Subsequent mentions: [Source X]
+   - Place citations at the START of sentences/claims
+   - Use inline citations for direct quotes or specific claims
+
+4. Response Structure:
+   - Begin with source overview list
+   - Provide a brief summary of how sources complement each other
+   - Organize information thematically rather than source-by-source
+   - Use clear transitions between different aspects
+   - Use formatting (bullets, sections) for clarity
+
+5. Information Synthesis Rules:
+   - Cross-reference similar information across sources
+   - Compare and contrast different perspectives
+   - Build comprehensive explanations using all sources
+   - Identify gaps where sources provide incomplete information
+   - Draw connections between related concepts across sources
+
+6. Missing Information:
+   - Explicitly state what information is not covered by any source
+   - Identify which sources lack specific details
+   - Note when additional sources might be needed
+   - Don't speculate beyond the provided sources
+
+CRITICAL REQUIREMENTS:
+1. NEVER ignore any provided source
+2. ALWAYS synthesize across ALL sources
+3. ALWAYS start with complete source list
+4. NEVER add information beyond the sources
+5. ALWAYS balance information from all sources
+6. ALWAYS note agreements/disagreements between sources"""
 
 @dataclass
 class LLMSettings:
@@ -47,8 +104,8 @@ class DocumentProcessingSettings:
 @dataclass
 class ResponseSettings:
     """Response generation settings."""
-    system_prompt: str = BASIC_SYSTEM_PROMPT
-    source_citation_prompt: str = SOURCE_CITATION_PROMPT
+    system_prompt: str = DEFAULT_BASIC_SYSTEM_PROMPT
+    source_citation_prompt: str = DEFAULT_SOURCE_CITATION_PROMPT
 
     def validate(self) -> bool:
         """Validate response settings."""
@@ -76,29 +133,70 @@ class CacheSettings:
 class DynamicSettings:
     """Manages dynamic settings with validation and change notification."""
     
+    _instance = None
+
+    def __new__(cls):
+        """Ensure singleton instance."""
+        if cls._instance is None:
+            logger.info("Creating DynamicSettings singleton")
+            cls._instance = super(DynamicSettings, cls).__new__(cls)
+            cls._instance._initialized = False
+            cls._instance._observers = []  # Initialize observers list here
+        return cls._instance
+
     def __init__(self):
         """Initialize settings with defaults from environment."""
-        self.llm = LLMSettings()
-        self.document_processing = DocumentProcessingSettings()
-        self.response = ResponseSettings()
-        self.cache = CacheSettings()
-        self._observers: List[Callable[[str, Any], None]] = []
+        if not self._initialized:
+            logger.info("Initializing DynamicSettings")
+            self.llm = LLMSettings()
+            self.document_processing = DocumentProcessingSettings()
+            self.response = ResponseSettings()
+            self.cache = CacheSettings()
+            self._initialized = True
+
+    @classmethod
+    def reset(cls):
+        """Reset the singleton instance. Used primarily for testing."""
+        global settings_manager
+        if cls._instance is not None:
+            cls._instance._observers = []  # Clear observers
+            cls._instance._initialized = False
+            cls._instance = None
+        # Create new instance and update global reference
+        settings_manager = cls()
+        return settings_manager
 
     def add_observer(self, observer: Callable[[str, Any], None]) -> None:
         """Add an observer to be notified of settings changes."""
-        self._observers.append(observer)
+        logger.info(f"Adding observer {observer.__self__.__class__.__name__ if hasattr(observer, '__self__') else 'function'}")
+        if observer not in self._observers:
+            self._observers.append(observer)
+            logger.info(f"Observer added. Total observers: {len(self._observers)}")
+        else:
+            logger.info("Observer already registered")
 
     def remove_observer(self, observer: Callable[[str, Any], None]) -> None:
         """Remove an observer."""
-        self._observers.remove(observer)
+        if observer in self._observers:
+            self._observers.remove(observer)
 
     def _notify_observers(self, setting_name: str, new_value: Any) -> None:
         """Notify observers of a setting change."""
+        logger.info(f"Notifying {len(self._observers)} observers of {setting_name} change")
         for observer in self._observers:
             try:
+                # Get observer name for logging
+                if hasattr(observer, '__self__'):
+                    observer_name = observer.__self__.__class__.__name__
+                elif hasattr(observer, '__name__'):
+                    observer_name = observer.__name__
+                else:
+                    observer_name = 'function'
+                logger.info(f"Notifying observer {observer_name}")
                 observer(setting_name, new_value)
             except Exception as e:
                 logger.error(f"Error notifying observer of setting change: {e}")
+                logger.error(f"Observer: {observer}")
 
     def get_all_settings(self) -> Dict[str, Any]:
         """Get all current settings as a dictionary."""
@@ -110,15 +208,8 @@ class DynamicSettings:
         }
 
     def update_settings(self, new_settings: Dict[str, Any]) -> bool:
-        """
-        Update settings with validation.
-        
-        Args:
-            new_settings: Dictionary of settings to update
-            
-        Returns:
-            bool: True if all updates were successful
-        """
+        """Update settings with validation."""
+        logger.info(f"Updating settings with: {new_settings}")
         success = True
         
         # Update LLM settings
@@ -156,7 +247,9 @@ class DynamicSettings:
                 source_citation_prompt=resp_settings.get('source_citation_prompt', self.response.source_citation_prompt)
             )
             if temp_resp.validate():
+                logger.info(f"Response settings before update: {asdict(self.response)}")
                 self.response = temp_resp
+                logger.info(f"Response settings after update: {asdict(self.response)}")
                 self._notify_observers('response', asdict(self.response))
             else:
                 success = False

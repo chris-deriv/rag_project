@@ -1,4 +1,27 @@
-"""Configuration settings for the RAG application."""
+"""Configuration settings for the RAG application.
+
+This module handles core environment configuration and provides default values for dynamic settings.
+It is organized into several categories:
+
+1. Core Environment Settings:
+   - Required API keys and essential configuration that must be set in the environment
+
+2. Storage Paths:
+   - Directory paths for database, uploads, and other persistent storage
+   - These should be configured per deployment environment
+
+3. Model Settings:
+   - Configuration for embedding models and other ML components
+   - These are typically static per deployment
+
+4. Default Values for Dynamic Settings:
+   - Initial values for settings that can be changed at runtime
+   - These values are used to initialize the dynamic settings system
+   - Changes to these settings should be made through the settings API, not environment variables
+
+For runtime-configurable settings, use the dynamic_settings module instead of modifying
+environment variables directly.
+"""
 import os
 from typing import Optional
 
@@ -30,55 +53,42 @@ def get_env_bool(key: str, default: Optional[bool] = None) -> bool:
         raise ValueError(f"Missing required environment variable: {key}")
     return value.lower() in ('true', '1', 'yes', 'on')
 
-# OpenAI API settings
+# Core environment settings
 OPENAI_API_KEY = get_env_str("OPENAI_API_KEY")
-OPENAI_MODEL = get_env_str("OPENAI_MODEL", "gpt-3.5-turbo")
-OPENAI_TEMPERATURE = get_env_float("DEFAULT_TEMPERATURE", 0.3)
-OPENAI_MAX_TOKENS = get_env_int("DEFAULT_MAX_TOKENS", 1000)
 
-# Document processing settings
-CHUNK_SIZE = get_env_int("DEFAULT_CHUNK_SIZE", 500)
-CHUNK_OVERLAP = get_env_int("DEFAULT_CHUNK_OVERLAP", 50)
-
-# Response settings
-SYSTEM_PROMPT = get_env_str(
-    "SYSTEM_PROMPT",
-    "You are a helpful assistant that provides detailed and accurate responses."
-)
-SOURCE_CITATION_PROMPT = get_env_str(
-    "SOURCE_CITATION_PROMPT",
-    "You are a helpful assistant that provides detailed responses with source citations."
-)
-
-# Cache settings
-RESPONSE_CACHE_SIZE = get_env_int("RESPONSE_CACHE_SIZE", 1000)
-CACHE_ENABLED = get_env_bool("RESPONSE_CACHE_ENABLED", True)
-
-# Database settings
+# Storage paths
 CHROMA_COLLECTION_NAME = get_env_str("CHROMA_COLLECTION_NAME", "documents")
 CHROMA_PERSIST_DIR = get_env_str("CHROMA_PERSIST_DIR", "./chroma_db")
-
-# File upload settings
 UPLOAD_FOLDER = get_env_str("UPLOAD_FOLDER", "./uploads")
-MAX_CONTENT_LENGTH = get_env_int("MAX_CONTENT_LENGTH", 16 * 1024 * 1024)  # 16MB
-ALLOWED_EXTENSIONS = {'pdf', 'docx', 'doc'}
 
-# Embedding settings
+# Model settings
 EMBEDDING_MODEL_NAME = get_env_str("EMBEDDING_MODEL_NAME", "all-MiniLM-L6-v2")
 
-# Settings dictionaries for dynamic settings
+# File upload settings
+ALLOWED_EXTENSIONS = {'pdf', 'docx', 'doc'}
+
+# Default values for dynamic settings
+DEFAULT_MODEL = get_env_str("OPENAI_MODEL", "gpt-3.5-turbo")
+DEFAULT_TEMPERATURE = get_env_float("DEFAULT_TEMPERATURE", 0.3)
+DEFAULT_MAX_TOKENS = get_env_int("DEFAULT_MAX_TOKENS", 1000)
+DEFAULT_CHUNK_SIZE = get_env_int("DEFAULT_CHUNK_SIZE", 500)
+DEFAULT_CHUNK_OVERLAP = get_env_int("DEFAULT_CHUNK_OVERLAP", 50)
+DEFAULT_CACHE_SIZE = get_env_int("RESPONSE_CACHE_SIZE", 1000)
+DEFAULT_CACHE_ENABLED = get_env_bool("RESPONSE_CACHE_ENABLED", True)
+
+# Settings dictionaries for dynamic settings initialization
 LLM_SETTINGS = {
-    'temperature': OPENAI_TEMPERATURE,
-    'max_tokens': OPENAI_MAX_TOKENS,
-    'model': OPENAI_MODEL
+    'temperature': DEFAULT_TEMPERATURE,
+    'max_tokens': DEFAULT_MAX_TOKENS,
+    'model': DEFAULT_MODEL
 }
 
 DOCUMENT_PROCESSING_SETTINGS = {
-    'chunk_size': CHUNK_SIZE,
-    'chunk_overlap': CHUNK_OVERLAP
+    'chunk_size': DEFAULT_CHUNK_SIZE,
+    'chunk_overlap': DEFAULT_CHUNK_OVERLAP
 }
 
 CACHE_SETTINGS = {
-    'enabled': CACHE_ENABLED,
-    'size': RESPONSE_CACHE_SIZE
+    'enabled': DEFAULT_CACHE_ENABLED,
+    'size': DEFAULT_CACHE_SIZE
 }

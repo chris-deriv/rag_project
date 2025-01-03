@@ -105,10 +105,17 @@ class DocumentProcessor:
 
     def _get_title_from_content(self, text: str) -> Optional[str]:
         """Extract title from the first line of content if it looks like a title."""
+        if not text or not text.strip():
+            return None
+            
         first_line = text.strip().split('\n')[0].strip()
+        if not first_line:  # Skip empty lines
+            return None
+            
         # Only consider it a title if it's short, doesn't end with punctuation,
         # and contains words that might indicate it's a title (e.g., starts with capital letter)
         if (len(first_line) <= 100 and 
+            len(first_line) > 0 and  # Ensure line has content
             not first_line[-1] in '.!?' and 
             first_line[0].isupper() and
             not first_line.lower().startswith(('the ', 'this ', 'just ', 'test '))):
@@ -193,13 +200,24 @@ class DocumentProcessor:
                 
                 file_path = docx_path
             
-            doc = Document(file_path)
+            try:
+                doc = Document(file_path)
+            except Exception as e:
+                logger.error(f"Failed to open DOCX file: {str(e)}")
+                raise ValueError(f"Failed to open DOCX file: {str(e)}")
             
+            if not hasattr(doc, 'paragraphs'):
+                raise ValueError("Invalid DOCX file: document has no paragraphs")
+                
             # Get title from document properties if available
-            title = doc.core_properties.title if doc.core_properties.title else ''
+            try:
+                title = doc.core_properties.title if hasattr(doc, 'core_properties') and doc.core_properties and doc.core_properties.title else ''
+            except Exception as e:
+                logger.warning(f"Error accessing document properties: {str(e)}")
+                title = ''
             
             # If no title in properties, try to get from first paragraph
-            if not title and doc.paragraphs:
+            if not title and doc.paragraphs and len(doc.paragraphs) > 0:
                 first_para_text = doc.paragraphs[0].text
                 title = self._get_title_from_content(first_para_text)
             
