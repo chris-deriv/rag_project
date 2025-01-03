@@ -305,6 +305,107 @@ class TestDocumentProcessor:
             if os.path.exists(test_pdf):
                 os.remove(test_pdf)
 
+    def test_get_title_from_content(self):
+        """Test title extraction from content with various edge cases."""
+        processor = DocumentProcessor()
+        
+        # Test empty content
+        assert processor._get_title_from_content("") is None
+        assert processor._get_title_from_content(None) is None
+        assert processor._get_title_from_content("   ") is None
+        
+        # Test content with only whitespace and newlines
+        assert processor._get_title_from_content("\n\n\t  \n") is None
+        
+        # Test valid title
+        assert processor._get_title_from_content("Valid Title\nContent below") == "Valid Title"
+        
+        # Test title with punctuation (should not be considered a title)
+        assert processor._get_title_from_content("Not a title.\nContent") is None
+        
+        # Test lowercase start (should not be considered a title)
+        assert processor._get_title_from_content("lowercase start\nContent") is None
+        
+        # Test excluded starts
+        assert processor._get_title_from_content("The document title\nContent") is None
+        assert processor._get_title_from_content("This is a test\nContent") is None
+
+    def test_docx_processing_errors(self):
+        """Test DOCX processing error handling."""
+        processor = DocumentProcessor()
+        
+        # Test invalid DOCX file
+        with tempfile.NamedTemporaryFile(suffix='.docx', mode='w+b', delete=False) as f:
+            f.write(b'Not a valid DOCX file')
+            test_file = f.name
+            
+        try:
+            with pytest.raises(ValueError) as exc_info:
+                processor._extract_docx_text(test_file)
+            assert "Failed to open DOCX file" in str(exc_info.value)
+        finally:
+            if os.path.exists(test_file):
+                os.remove(test_file)
+                
+        # Test DOCX with missing paragraphs attribute
+        mock_doc = Mock(spec=['core_properties'])  # No paragraphs attribute
+        with patch('src.documents.Document', return_value=mock_doc):
+            with pytest.raises(ValueError) as exc_info:
+                processor._extract_docx_text("test.docx")
+            assert "Invalid DOCX file: document has no paragraphs" in str(exc_info.value)
+            
+        # Test DOCX with property access error
+        mock_doc = Mock(spec=['paragraphs', 'core_properties'])
+        mock_doc.paragraphs = []  # Empty but iterable
+        type(mock_doc).core_properties = PropertyMock(side_effect=Exception("Property access error"))
+        
+        with patch('src.documents.Document', return_value=mock_doc):
+            # Should not raise exception, should handle property error gracefully
+            sections = processor._extract_docx_text("test.docx")
+            assert isinstance(sections, list)
+
+    def test_docx_title_extraction(self):
+        """Test DOCX title extraction with various property scenarios."""
+        processor = DocumentProcessor()
+        
+        # Test with valid core properties title
+        mock_doc = Mock(spec=['paragraphs', 'core_properties'])
+        mock_para = Mock()
+        mock_para.text = "First paragraph"
+        mock_doc.paragraphs = [mock_para]  # Make paragraphs iterable
+        mock_properties = Mock()
+        mock_properties.title = "Document Title"
+        type(mock_doc).core_properties = PropertyMock(return_value=mock_properties)
+        
+        with patch('src.documents.Document', return_value=mock_doc):
+            sections = processor._extract_docx_text("test.docx")
+            assert sections[0]['metadata']['title'] == "Document Title"
+        
+        # Test with missing core_properties attribute
+        mock_doc = Mock(spec=['paragraphs'])  # No core_properties attribute
+        mock_para = Mock()
+        mock_para.text = "First paragraph"
+        mock_doc.paragraphs = [mock_para]  # Make paragraphs iterable
+        
+        with patch('src.documents.Document', return_value=mock_doc):
+            sections = processor._extract_docx_text("test.docx")
+            # Should fall back to first paragraph or filename
+            assert sections[0]['metadata']['title'] in ["First paragraph", "test"]
+        
+        # Test with None title in core properties
+        mock_doc = Mock(spec=['paragraphs', 'core_properties'])
+        mock_para = Mock()
+        mock_para.text = "First paragraph"
+        mock_doc.paragraphs = [mock_para]  # Make paragraphs iterable
+        mock_properties = Mock()
+        mock_properties.title = None
+        type(mock_doc).core_properties = PropertyMock(return_value=mock_properties)
+        
+        with patch('src.documents.Document', return_value=mock_doc):
+            sections = processor._extract_docx_text("test.docx")
+            # Should fall back to first paragraph or filename
+            assert sections[0]['metadata']['title'] in ["First paragraph", "test"]
+
     def test_error_handling(self):
         """Test error handling in document operations."""
         processor = DocumentProcessor()
