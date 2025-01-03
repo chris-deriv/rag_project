@@ -10,8 +10,7 @@ import {
     Button,
     Box,
     Alert,
-    Paper,
-    Divider
+    Paper
 } from '@mui/material';
 
 const SettingsPanel = ({ onClose }) => {
