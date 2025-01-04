@@ -1,3 +1,4 @@
+"""Test web API endpoints."""
 import pytest
 from src.api import app
 from unittest.mock import patch, Mock, ANY
@@ -41,7 +42,9 @@ def mock_document_store():
         mock_state.source_name = 'test.pdf'
         mock_state.chunk_count = 5
         mock_state.total_chunks = 5
-        
+        mock_state.classification = 'policies_procedures'
+        mock_state.toc = [{'text': 'Test Document', 'level': 1, 'children': []}]
+
         # Configure mock store
         mock_store.process_and_store_document.return_value = mock_state
         mock_store.get_processing_state.return_value = mock_state
@@ -49,7 +52,9 @@ def mock_document_store():
             'source_name': 'test.pdf',
             'title': 'Test Document',
             'chunk_count': 5,
-            'total_chunks': 5
+            'total_chunks': 5,
+            'classification': 'policies_procedures',
+            'toc': [{'text': 'Test Document', 'level': 1, 'children': []}]
         }
         yield mock_store
 
@@ -58,14 +63,14 @@ def test_upload_file_success(client, mock_document_store, mock_rag_app):
     # Create a mock file
     file_content = b'Test PDF content'
     file = (io.BytesIO(file_content), 'test.pdf')
-    
+
     # Make request
     response = client.post(
         '/upload',
         data={'file': file},
         content_type='multipart/form-data'
     )
-    
+
     # Verify initial response
     assert response.status_code == 200
     data = json.loads(response.data)
@@ -81,8 +86,10 @@ def test_upload_status_success(client, mock_document_store):
     mock_state.source_name = 'test.pdf'
     mock_state.chunk_count = 5
     mock_state.total_chunks = 5
+    mock_state.classification = 'policies_procedures'
+    mock_state.toc = [{'text': 'Test Document', 'level': 1, 'children': []}]
     mock_document_store.get_processing_state.return_value = mock_state
-    
+
     # Check status
     response = client.get('/upload-status/test.pdf')
     assert response.status_code == 200
@@ -92,6 +99,8 @@ def test_upload_status_success(client, mock_document_store):
     assert data['source_name'] == 'test.pdf'
     assert data['chunk_count'] == 5
     assert data['total_chunks'] == 5
+    assert data['classification'] == 'policies_procedures'
+    assert data['toc'] == [{'text': 'Test Document', 'level': 1, 'children': []}]
 
 def test_upload_status_error(client, mock_document_store):
     """Test upload status endpoint for failed processing."""
@@ -102,8 +111,10 @@ def test_upload_status_error(client, mock_document_store):
     mock_state.source_name = 'test.pdf'
     mock_state.chunk_count = 0
     mock_state.total_chunks = 0
+    mock_state.classification = None
+    mock_state.toc = None
     mock_document_store.get_processing_state.return_value = mock_state
-    
+
     # Check status
     response = client.get('/upload-status/test.pdf')
     assert response.status_code == 200
@@ -111,6 +122,8 @@ def test_upload_status_error(client, mock_document_store):
     assert data['status'] == 'error'
     assert data['error'] == 'Processing error'
     assert data['chunk_count'] == 0
+    assert data['classification'] is None
+    assert data['toc'] is None
 
 def test_upload_status_processing(client, mock_document_store):
     """Test upload status endpoint for document still processing."""
@@ -121,8 +134,10 @@ def test_upload_status_processing(client, mock_document_store):
     mock_state.source_name = 'test.pdf'
     mock_state.chunk_count = 2
     mock_state.total_chunks = 5
+    mock_state.classification = None
+    mock_state.toc = None
     mock_document_store.get_processing_state.return_value = mock_state
-    
+
     # Check status
     response = client.get('/upload-status/test.pdf')
     assert response.status_code == 200
@@ -130,6 +145,8 @@ def test_upload_status_processing(client, mock_document_store):
     assert data['status'] == 'processing'
     assert data['chunk_count'] == 2
     assert data['total_chunks'] == 5
+    assert data['classification'] is None
+    assert data['toc'] is None
 
 def test_upload_status_unknown_file(client):
     """Test upload status endpoint for unknown file."""
@@ -141,7 +158,7 @@ def test_upload_status_unknown_file(client):
 def test_upload_file_no_file(client):
     """Test file upload with no file."""
     response = client.post('/upload')
-    
+
     assert response.status_code == 400
     data = json.loads(response.data)
     assert data['error'] == 'No file part'
@@ -154,7 +171,7 @@ def test_upload_file_empty_filename(client):
         data={'file': file},
         content_type='multipart/form-data'
     )
-    
+
     assert response.status_code == 400
     data = json.loads(response.data)
     assert data['error'] == 'No selected file'
@@ -167,7 +184,7 @@ def test_upload_file_invalid_type(client):
         data={'file': file},
         content_type='multipart/form-data'
     )
-    
+
     assert response.status_code == 400
     data = json.loads(response.data)
     assert data['error'] == 'Invalid file type'
@@ -181,34 +198,40 @@ def test_document_names_success(client, mock_vector_db):
             'title': 'Test Document 1',
             'chunk_count': 5,
             'total_chunks': 5,
-            'status': 'completed'
+            'status': 'completed',
+            'classification': 'policies_procedures',
+            'toc': [{'text': 'Test Document 1', 'level': 1, 'children': []}]
         },
         {
             'source_name': 'test2.docx',
             'title': 'Test Document 2',
             'chunk_count': 3,
             'total_chunks': 3,
-            'status': 'completed'
+            'status': 'completed',
+            'classification': 'human_resources',
+            'toc': [{'text': 'Test Document 2', 'level': 1, 'children': []}]
         }
     ]
-    
+
     response = client.get('/document-names')
-    
+
     # Verify response
     assert response.status_code == 200
     data = json.loads(response.data)
     assert len(data) == 2
-    
+
     # Verify required fields
-    required_fields = ['source_name', 'title', 'chunk_count', 'total_chunks', 'status']
+    required_fields = ['source_name', 'title', 'chunk_count', 'total_chunks', 'status', 'classification', 'toc']
     for doc in data:
         for field in required_fields:
             assert field in doc
-    
+
     # Verify specific document data
     assert data[0]['source_name'] == 'test1.pdf'
+    assert data[0]['classification'] == 'policies_procedures'
     assert data[1]['source_name'] == 'test2.docx'
-    
+    assert data[1]['classification'] == 'human_resources'
+
     # Verify list_document_names was called
     mock_vector_db.list_document_names.assert_called_once()
 
@@ -216,9 +239,9 @@ def test_document_names_error(client, mock_vector_db):
     """Test error handling in document names retrieval."""
     # Mock database error
     mock_vector_db.list_document_names.side_effect = Exception('Database error')
-    
+
     response = client.get('/document-names')
-    
+
     assert response.status_code == 500
     data = json.loads(response.data)
     assert 'error' in data
@@ -232,41 +255,46 @@ def test_search_titles_success(client, mock_vector_db):
             'title': 'Python Programming Guide',
             'source_name': 'python_guide.pdf',
             'file_type': 'pdf',
-            'section_type': 'content'
+            'section_type': 'content',
+            'classification': 'it_technology',
+            'toc': [{'text': 'Python Programming Guide', 'level': 1, 'children': []}]
         },
         {
             'title': 'Learning Python',
             'source_name': 'learning.pdf',
             'file_type': 'pdf',
-            'section_type': 'content'
+            'section_type': 'content',
+            'classification': 'it_technology',
+            'toc': [{'text': 'Learning Python', 'level': 1, 'children': []}]
         }
     ]
-    
+
     # Make request
     response = client.get('/search-titles?q=python')
-    
+
     # Verify response
     assert response.status_code == 200
     data = json.loads(response.data)
     assert len(data) == 2
-    
+
     # Verify required fields
-    required_fields = ['source_name', 'title', 'file_type', 'section_type']
+    required_fields = ['source_name', 'title', 'file_type', 'section_type', 'classification', 'toc']
     for doc in data:
         for field in required_fields:
             assert field in doc
-    
+
     # Verify specific document data
     assert data[0]['title'] == 'Python Programming Guide'
     assert data[0]['source_name'] == 'python_guide.pdf'
-    
+    assert data[0]['classification'] == 'it_technology'
+
     # Verify search was called with correct query
     mock_vector_db.search_titles.assert_called_once_with('python')
 
 def test_search_titles_no_query(client):
     """Test title search with no query parameter."""
     response = client.get('/search-titles')
-    
+
     assert response.status_code == 400
     data = json.loads(response.data)
     assert 'error' in data
@@ -275,7 +303,7 @@ def test_search_titles_no_query(client):
 def test_search_titles_empty_query(client):
     """Test title search with empty query string."""
     response = client.get('/search-titles?q=')
-    
+
     assert response.status_code == 400
     data = json.loads(response.data)
     assert 'error' in data
@@ -285,9 +313,9 @@ def test_search_titles_error_handling(client, mock_vector_db):
     """Test error handling in title search."""
     # Mock search error
     mock_vector_db.search_titles.side_effect = Exception('Database error')
-    
+
     response = client.get('/search-titles?q=python')
-    
+
     assert response.status_code == 500
     data = json.loads(response.data)
     assert 'error' in data
@@ -297,18 +325,18 @@ def test_chat_with_title_filter(client, mock_rag_app):
     """Test chat endpoint with title filter."""
     # Mock response
     mock_rag_app.query_documents.return_value = "Response about Python"
-    
+
     # Make request with title filter
     response = client.post('/chat', json={
         'query': 'What is this about?',
         'title': 'python'
     })
-    
+
     # Verify response
     assert response.status_code == 200
     data = json.loads(response.data)
     assert data['response'] == 'Response about Python'
-    
+
     # Verify query was called with title filter
     mock_rag_app.query_documents.assert_called_once_with(
         'What is this about?',
@@ -320,19 +348,19 @@ def test_chat_with_source_names_filter(client, mock_rag_app):
     """Test chat endpoint with source names filter."""
     # Mock response
     mock_rag_app.query_documents.return_value = "Response from test.pdf"
-    
+
     # Make request with source names filter
     source_names = ['test1.pdf', 'test2.pdf']
     response = client.post('/chat', json={
         'query': 'What is this about?',
         'source_names': source_names
     })
-    
+
     # Verify response
     assert response.status_code == 200
     data = json.loads(response.data)
     assert data['response'] == 'Response from test.pdf'
-    
+
     # Verify query was called with source names filter
     mock_rag_app.query_documents.assert_called_once_with(
         'What is this about?',
@@ -344,7 +372,7 @@ def test_chat_with_both_filters(client, mock_rag_app):
     """Test chat endpoint with both title and source names filters."""
     # Mock response
     mock_rag_app.query_documents.return_value = "Filtered response"
-    
+
     # Make request with both filters
     source_names = ['test1.pdf', 'test2.pdf']
     response = client.post('/chat', json={
@@ -352,12 +380,12 @@ def test_chat_with_both_filters(client, mock_rag_app):
         'source_names': source_names,
         'title': 'python'
     })
-    
+
     # Verify response
     assert response.status_code == 200
     data = json.loads(response.data)
     assert data['response'] == 'Filtered response'
-    
+
     # Verify query was called with both filters
     mock_rag_app.query_documents.assert_called_once_with(
         'What is this about?',
@@ -370,7 +398,7 @@ def test_chat_no_query(client):
     response = client.post('/chat', json={
         'title': 'python'
     })
-    
+
     assert response.status_code == 400
     data = json.loads(response.data)
     assert 'error' in data
@@ -380,12 +408,12 @@ def test_chat_error_handling(client, mock_rag_app):
     """Test error handling in chat endpoint."""
     # Mock query error
     mock_rag_app.query_documents.side_effect = Exception('Query error')
-    
+
     response = client.post('/chat', json={
         'query': 'What is this about?',
         'title': 'python'
     })
-    
+
     assert response.status_code == 500
     data = json.loads(response.data)
     assert 'error' in data

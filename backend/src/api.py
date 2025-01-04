@@ -119,7 +119,9 @@ def get_upload_status(filename):
         'error': state.error,
         'source_name': state.source_name,
         'chunk_count': state.chunk_count,
-        'total_chunks': state.total_chunks
+        'total_chunks': state.total_chunks,
+        'classification': state.classification,
+        'toc': state.toc
     }
     return jsonify(response)
 
@@ -227,7 +229,9 @@ def list_document_names():
                     'title': filename,
                     'chunk_count': state.chunk_count,
                     'total_chunks': state.total_chunks,
-                    'status': state.status
+                    'status': state.status,
+                    'classification': state.classification,
+                    'toc': state.toc
                 })
         
         return jsonify(documents)
