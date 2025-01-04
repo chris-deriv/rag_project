@@ -1,12 +1,12 @@
 """Document analysis and classification for the RAG application."""
 import re
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Any
 from dataclasses import dataclass
 import logging
+from langchain.docstore.document import Document
 from .config.constants import (
     DOCUMENT_CLASSIFICATIONS,
-    HEADING_PATTERNS,
-    SECTION_NUMBER_FORMATS
+    HEADING_PATTERNS
 )
 
 logger = logging.getLogger(__name__)
@@ -22,125 +22,189 @@ class Heading:
 @dataclass
 class DocumentSection:
     """Represents a section of the document with its heading and content."""
-    heading: Heading
-    content: str
-    subsections: List['DocumentSection']
+    text: str
+    start_pos: int
+    end_pos: int
+    heading: Optional[Heading] = None
 
 class DocumentAnalyzer:
     """Analyzes documents for classification and structure."""
 
     def __init__(self):
         """Initialize the document analyzer."""
-        self.heading_patterns = [re.compile(pattern) for pattern in HEADING_PATTERNS]
+        logger.info("Initialized DocumentAnalyzer")
 
-    def _clean_section_number(self, number: str) -> str:
-        """Clean section number by removing trailing periods."""
-        # Handle special prefixes
-        for prefix in ['Section', 'Chapter', 'Part', 'Appendix']:
-            if number.startswith(prefix):
-                parts = number.split(' ', 1)
-                if len(parts) > 1:
-                    return f"{prefix} {parts[1].rstrip('.')}"
-                return number
+    def clean_text(self, text: str) -> str:
+        """Clean and normalize text content."""
+        if not text:
+            return ""
+            
+        # Replace form feeds and other special characters
+        text = text.replace('\f', '\n')
+        text = text.replace('\r', '\n')
         
-        # Remove trailing period
-        return number.rstrip('.')
+        # Split into lines, clean each line while preserving markdown
+        lines = []
+        for line in text.split('\n'):
+            # Preserve markdown heading markers
+            if line.strip().startswith('#'):
+                # Only normalize spaces after the # markers
+                hash_count = len(re.match(r'^#+', line.strip()).group())
+                line = '#' * hash_count + ' ' + re.sub(r'\s+', ' ', line.strip()[hash_count:]).strip()
+            else:
+                # Preserve dots in section numbers
+                if re.match(r'^\d+\.(?:\d+)?\.?[a-z]?\.?\s', line.strip()):
+                    # Keep original spacing for numbered sections with letters
+                    line = line.strip()
+                else:
+                    line = re.sub(r'\s+', ' ', line).strip()
+            if line:
+                lines.append(line)
+                
+        return '\n'.join(lines)
 
-    def _get_section_level(self, section_number: str, is_markdown: bool = False) -> int:
-        """Determine heading level from section number format."""
-        if is_markdown:
-            return len(section_number)
+    def _extract_section_info(self, text: str, start_pos: int) -> Tuple[str, int, int]:
+        """Extract section level and clean heading text."""
+        # Markdown headings (must come first)
+        markdown_match = re.match(r'^(#{1,6})\s+(.+)$', text)
+        if markdown_match:
+            level = len(markdown_match.group(1))
+            return markdown_match.group(2).strip(), level, len(text)
+
+        # Common section patterns
+        patterns = [
+            # Mixed formats (must come first)
+            (r'^(\d+)\.(\d+)\.([a-z])\.\s*(.+)$', 3, lambda m: f"{m.group(1)}.{m.group(2)}.{m.group(3)} {m.group(4)}"),  # 2.1.a
+            (r'^(\d+)\.([a-z])\.\s*(.+)$', 2, lambda m: f"{m.group(1)}.{m.group(2)} {m.group(3)}"),  # 1.a
             
-        if not section_number:
-            return 1
-
-        # Handle special prefixes
-        if any(prefix in section_number for prefix in ['Section', 'Chapter', 'Part']):
-            return 1
-        elif 'Appendix' in section_number:
-            return 2
-
-        # Handle letter-based sections with subsections
-        if re.match(r'^[A-Z]$', section_number):  # Single letter (A, B, etc.)
-            return 1
-        elif re.match(r'^[A-Z]\.\d+', section_number):  # Letter with subsection (A.1, etc.)
-            return 2
-        elif re.match(r'^[A-Z](?:\.\d+){2,}', section_number):  # Letter with multiple subsections (A.1.1, etc.)
-            return 3
-
-        # Handle Roman numerals
-        if re.match(r'^[IVX]+$', section_number):  # Single Roman numeral (I, II, etc.)
-            return 1
-        elif re.match(r'^[IVX]+\.\d+', section_number):  # Roman numeral with subsection (I.1, etc.)
-            return 2
-
-        # Handle numeric sections
-        if re.match(r'^\d+$', section_number):  # Single number (1, 2, etc.)
-            return 1
-        elif re.match(r'^\d+\.[a-z]', section_number):  # Number with letter (1.a, etc.)
-            return 2
-        elif re.match(r'^\d+\.\d+\.[a-z]', section_number):  # Number with subsection and letter (2.1.a)
-            return 3
-        elif re.match(r'^\d+\.\d+', section_number):  # Number with subsection (1.1, etc.)
-            return 2
+            # Letter sections with subsections
+            (r'^([A-Z])\.(\d+)\.(\d+)\.\s*(.+)$', 3, lambda m: f"{m.group(1)}.{m.group(2)}.{m.group(3)} {m.group(4)}"),  # A.1.1
+            (r'^([A-Z])\.(\d+)\.\s*(.+)$', 2, lambda m: f"{m.group(1)}.{m.group(2)} {m.group(3)}"),  # A.1
+            (r'^([A-Z])\.\s*(.+)$', 1, lambda m: f"{m.group(1)} {m.group(2)}"),  # A
             
-        return 1
+            # Roman numerals with subsections
+            (r'^([IVX]+)\.(\d+)\.\s*(.+)$', 3, lambda m: f"{m.group(1)}.{m.group(2)} {m.group(3)}"),  # IV.1
+            (r'^([IVX]+)\.\s*(.+)$', 2, lambda m: f"{m.group(1)} {m.group(2)}"),  # IV
+            
+            # Numeric sections with subsections
+            (r'^(\d+)\.(\d+)\.([a-z])\.\s*(.+)$', 3, lambda m: f"{m.group(1)}.{m.group(2)}.{m.group(3)} {m.group(4)}"),  # 2.1.a
+            (r'^(\d+)\.(\d+)\.\s*(.+)$', 2, lambda m: f"{m.group(1)}.{m.group(2)} {m.group(3)}"),  # 2.1
+            (r'^(\d+)\.\s*(.+)$', 1, lambda m: f"{m.group(1)} {m.group(2)}"),  # 1
+            
+            # Special sections
+            (r'^(?:Section|Chapter)\s+(\d+(?:\.\d+)*):?\s*(.+)$', 1, lambda m: f"{m.group(0).split(':')[0]} {m.group(2)}"),  # Section 1.1
+            (r'^Appendix\s+([A-Z](?:\.\d+)*):?\s*(.+)$', 2, lambda m: f"{m.group(0).split(':')[0]} {m.group(2)}"),  # Appendix A.1
+            
+            # ALL CAPS sections (treat as major sections)
+            (r'^([A-Z][A-Z\s]+(?::[A-Z\s]*)?)\s*(.*)$', 1, lambda m: m.group(1).strip() + (' ' + m.group(2) if m.group(2) else '')),
+        ]
+        
+        # Try each pattern
+        for pattern, level, formatter in patterns:
+            match = re.match(pattern, text)
+            if match:
+                # Special handling for mixed formats to preserve dots
+                if '.a.' in text or '.a ' in text:
+                    # Extract the original format up to the content
+                    prefix = text[:text.index(' ')].strip()
+                    content = text[text.index(' '):].strip()
+                    # Increase level for letter suffixes
+                    if re.search(r'\.[a-z]\.?$', prefix):
+                        level += 1
+                    return f"{prefix} {content}", level, len(text)
+                    
+                # Special handling for Roman numerals
+                if re.match(r'^[IVX]+\.', text):
+                    if '.' in text[:-1]:  # Has subsection (e.g., I.1)
+                        level = 3  # Roman numeral subsections are level 3
+                    else:
+                        level = 2  # Plain Roman numerals are level 2
+                    
+                return formatter(match), level, len(text)
+                
+        return text.strip(), 1, len(text)
 
     def extract_headings(self, text: str) -> List[Heading]:
         """Extract headings from document text."""
+        if not isinstance(text, str):
+            text = str(text) if text is not None else ""
+            
         headings = []
-        lines = text.split('\n')
         current_pos = 0
         
-        for line in lines:
-            original_line = line
+        # Split text into lines and clean up
+        lines = []
+        for line in text.split('\n'):
             line = line.strip()
-            if not line:
-                current_pos += len(original_line) + 1
+            # Skip empty lines and likely non-heading content
+            if not line or len(line) > 200:  # Skip very long lines
+                current_pos += len(line) + 1
                 continue
-            
-            # Try each heading pattern
-            for pattern in self.heading_patterns:
-                match = pattern.match(line)
-                if match:
-                    if pattern.pattern == r'^(#{1,6})\s+(.+)$':  # Markdown heading
-                        level = len(match.group(1))
-                        heading_text = match.group(2).strip()
-                    else:
-                        # For all other patterns
-                        if len(match.groups()) == 2:
-                            prefix = match.group(1).strip()
-                            text_part = match.group(2).strip() if match.group(2) else ''
-                            
-                            # Handle special cases
-                            if prefix.isupper() and (':' in prefix or not text_part):  # ALL CAPS
-                                heading_text = prefix + (' ' + text_part if text_part else '')
-                                level = 1
-                            elif re.match(r'^[A-Z][a-z]+\s+[A-Z][a-z]+:', prefix):  # Title Case Header:
-                                heading_text = prefix + text_part
-                                level = 1
-                            else:
-                                # Clean section number and determine level
-                                cleaned_prefix = self._clean_section_number(prefix)
-                                level = self._get_section_level(cleaned_prefix)
-                                heading_text = f"{cleaned_prefix}{' ' + text_part if text_part else ''}"
-                        else:
-                            # Fallback for simple headings
-                            heading_text = match.group(0).strip()
-                            level = 1
-                    
-                    heading = Heading(
-                        text=heading_text.strip(),
-                        level=level,
-                        start_pos=current_pos,
-                        end_pos=current_pos + len(original_line)
-                    )
-                    headings.append(heading)
-                    break
-            
-            current_pos += len(original_line) + 1
+                
+            lines.append((line, current_pos))
+            current_pos += len(line) + 1
         
+        # Process each line
+        for line, pos in lines:
+            # Try to extract section info
+            clean_text, level, length = self._extract_section_info(line, pos)
+            
+            # Only add if it looks like a heading
+            if clean_text and (
+                line.startswith('#') or  # Markdown
+                re.match(r'^[A-Z]\.', line) or  # Letter sections
+                re.match(r'^\d+\.', line) or  # Numbered sections
+                re.match(r'^[IVX]+\.', line) or  # Roman numerals
+                re.match(r'^(?:Section|Chapter|Part|Appendix)', line) or  # Special sections
+                re.match(r'^[A-Z][A-Z\s]+(?::|$)', line)  # ALL CAPS
+            ):
+                heading = Heading(
+                    text=clean_text,
+                    level=level,
+                    start_pos=pos,
+                    end_pos=pos + length
+                )
+                headings.append(heading)
+        
+        logger.info(f"Extracted {len(headings)} headings from document")
         return headings
+
+    def extract_sections(self, text: str, headings: List[Heading]) -> List[DocumentSection]:
+        """Extract document sections based on headings."""
+        if not headings:
+            # If no headings found, treat entire text as one section if not empty
+            text = text.strip() if isinstance(text, str) else str(text).strip()
+            return [DocumentSection(
+                text=text,
+                start_pos=0,
+                end_pos=len(text),
+                heading=None
+            )] if text and not text.isspace() else []
+            
+        sections = []
+        for i in range(len(headings)):
+            # Calculate section boundaries
+            start_pos = headings[i].start_pos
+            end_pos = headings[i+1].start_pos if i < len(headings)-1 else len(text)
+            
+            # Extract section text (including heading)
+            section_text = text[start_pos:end_pos].strip()
+            
+            # Only include sections with content beyond the heading
+            heading_text = text[start_pos:headings[i].end_pos].strip()
+            content_text = text[headings[i].end_pos:end_pos].strip()
+            
+            if content_text:  # Only include if there's content beyond the heading
+                section = DocumentSection(
+                    text=section_text,
+                    start_pos=start_pos,
+                    end_pos=start_pos + len(section_text),  # Fix position calculation
+                    heading=headings[i]
+                )
+                sections.append(section)
+                
+        logger.info(f"Extracted {len(sections)} sections from document")
+        return sections
 
     def build_toc(self, headings: List[Heading]) -> List[Dict]:
         """Build table of contents from headings."""
@@ -184,6 +248,12 @@ class DocumentAnalyzer:
         Classify document based on content and title.
         Returns the classification key from DOCUMENT_CLASSIFICATIONS.
         """
+        # Handle non-string inputs
+        if not isinstance(text, str):
+            text = str(text) if text is not None else ""
+        if not isinstance(title, str):
+            title = str(title) if title is not None else ""
+            
         # Prepare text for classification
         combined_text = f"{title}\n{text}".lower()
         
@@ -205,13 +275,13 @@ class DocumentAnalyzer:
                 'low': ['money', 'payment', 'price']
             },
             'it_technology': {
-                'high': ['it', 'technology', 'software', 'hardware', 'system', 'network', 'cyber'],
-                'medium': ['computer', 'data', 'security', 'infrastructure'],
+                'high': ['it', 'technology', 'software', 'hardware', 'system', 'network', 'cyber', 'disaster recovery'],
+                'medium': ['computer', 'data', 'security', 'infrastructure', 'backup', 'recovery'],
                 'low': ['digital', 'online', 'electronic']
             },
             'risk_management': {
-                'high': ['risk', 'mitigation', 'assessment', 'control', 'audit'],
-                'medium': ['compliance', 'security', 'safety'],
+                'high': ['risk', 'mitigation', 'assessment', 'control', 'audit', 'disaster'],
+                'medium': ['compliance', 'security', 'safety', 'emergency'],
                 'low': ['review', 'evaluation', 'monitoring']
             },
             'training_knowledge': {
@@ -289,34 +359,42 @@ class DocumentAnalyzer:
             - classification: document category
             - toc: table of contents
             - headings: list of extracted headings
+            - sections: list of document sections
         """
         try:
-            if not isinstance(text, str):
-                text = str(text) if text is not None else ""
+            # Handle non-string inputs
+            if not isinstance(text, str) or text is None:
+                return {
+                    'classification': 'miscellaneous',
+                    'toc': [],
+                    'headings': [],
+                    'sections': []
+                }
             if not isinstance(title, str):
                 title = str(title) if title is not None else ""
                 
+            # Clean and normalize text
+            text = self.clean_text(text)
+            
             # Extract headings
             headings = self.extract_headings(text)
+            logger.info(f"Extracted {len(headings)} headings from document")
+            
+            # Extract sections
+            sections = self.extract_sections(text, headings)
             
             # Build table of contents
             toc = self.build_toc(headings)
             
             # Classify document
             classification = self.classify_document(text, title)
+            logger.info(f"Classified document as: {classification}")
             
             return {
                 'classification': classification,
                 'toc': toc,
-                'headings': [
-                    {
-                        'text': h.text,
-                        'level': h.level,
-                        'start_pos': h.start_pos,
-                        'end_pos': h.end_pos
-                    }
-                    for h in headings
-                ]
+                'headings': headings,
+                'sections': sections
             }
             
         except Exception as e:
@@ -324,7 +402,8 @@ class DocumentAnalyzer:
             return {
                 'classification': 'miscellaneous',
                 'toc': [],
-                'headings': []
+                'headings': [],
+                'sections': []
             }
 
 # Global analyzer instance

@@ -7,7 +7,7 @@ from dataclasses import dataclass, asdict
 import re
 from pypdf import PdfReader
 from docx import Document
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 import tiktoken
 import logging
 import warnings
@@ -15,8 +15,9 @@ import subprocess
 import tempfile
 from .database import VectorDatabase
 from .embedding import EmbeddingGenerator
-from .document_analyzer import document_analyzer, DocumentAnalyzer
+from .document_analyzer import document_analyzer, DocumentAnalyzer, DocumentSection
 from config.dynamic_settings import settings_manager
+from config.settings import DEFAULT_CHUNK_SIZE, DEFAULT_CHUNK_OVERLAP
 
 # Configure logging with immediate output
 logging.basicConfig(
@@ -56,24 +57,37 @@ class DocumentProcessor:
         self.tokenizer = tiktoken.get_encoding("cl100k_base")
         self.analyzer = analyzer or document_analyzer
         
+        # Store chunk size locally
+        self.chunk_size = self.settings['document_processing'].get('chunk_size', DEFAULT_CHUNK_SIZE)
+        self.chunk_overlap = self.settings['document_processing'].get('chunk_overlap', DEFAULT_CHUNK_OVERLAP)
+        
         # Initialize text splitter with settings
         self._init_text_splitter()
         
         # Register as observer for settings changes
         settings_manager.add_observer(self._handle_settings_change)
+        
+        logger.info(f"Initialized DocumentProcessor with chunk_size={self.chunk_size}, "
+                   f"chunk_overlap={self.chunk_overlap}")
 
     def _handle_settings_change(self, setting_name: str, new_value: dict) -> None:
         """Handle settings changes from the settings manager."""
         if setting_name == 'document_processing':
+            logger.info(f"Updating document processing settings: {new_value}")
             self.settings['document_processing'] = new_value
+            self.chunk_size = new_value.get('chunk_size', DEFAULT_CHUNK_SIZE)
+            self.chunk_overlap = new_value.get('chunk_overlap', DEFAULT_CHUNK_OVERLAP)
             self._init_text_splitter()
 
     def _init_text_splitter(self) -> None:
         """Initialize or reinitialize the text splitter with current settings."""
+        logger.info(f"Initializing text splitter with chunk_size={self.chunk_size}, chunk_overlap={self.chunk_overlap}")
+        
+        # Use more aggressive splitting for better chunk size control
         self.text_splitter = RecursiveCharacterTextSplitter(
-            separators=["\n\n", "\n", ".", "!", "?", ";", ":", " ", ""],
-            chunk_size=self.settings['document_processing']['chunk_size'],
-            chunk_overlap=self.settings['document_processing']['chunk_overlap'],
+            separators=["\n\n", "\n", ". ", ".", "!", "?", ";", ":", " ", ""],
+            chunk_size=self.chunk_size,
+            chunk_overlap=self.chunk_overlap,
             length_function=self._get_length_function(),
             is_separator_regex=False
         )
@@ -83,115 +97,64 @@ class DocumentProcessor:
         if self.length_function == "token":
             return lambda x: len(self.tokenizer.encode(x))
         return len
-    
-    def process_document(self, file_path: str) -> List[DocumentChunk]:
-        """Process a document file into chunks with metadata."""
-        if not os.path.exists(file_path):
-            raise FileNotFoundError(f"File not found: {file_path}")
+
+    def _split_section(self, section: DocumentSection, metadata: Dict[str, Any]) -> List[DocumentChunk]:
+        """Split a section into chunks while preserving metadata."""
+        if not section.text.strip():
+            return []
             
-        file_ext = os.path.splitext(file_path)[1].lower()
-        if file_ext == '.pdf':
-            title, full_text, sections = self._extract_pdf_text(file_path)
-        elif file_ext in ['.doc', '.docx']:
-            title, full_text, sections = self._extract_docx_text(file_path)
-        else:
-            raise ValueError(f"Unsupported file type: {file_ext}")
-            
-        # Analyze document structure and classification
-        logger.info(f"Analyzing document: {title}")
-        analysis = self.analyzer.analyze_document(full_text, title)
-        logger.info(f"Document analysis result: {analysis}")
-            
+        # Split text into chunks
+        raw_chunks = self.text_splitter.split_text(section.text)
+        
+        if len(raw_chunks) > 1:
+            logger.info(f"Split section into {len(raw_chunks)} chunks")
+        
+        # Create document chunks with metadata
         chunks = []
-        for section in sections:
-            metadata = section['metadata']
-            metadata.update({
-                'classification': analysis['classification'],
-                'toc': json.dumps(analysis['toc'])  # Convert TOC to JSON string
-            })
+        for i, chunk_text in enumerate(raw_chunks):
+            chunk_metadata = {
+                **metadata,
+                'chunk_index': i,
+                'total_chunks': len(raw_chunks)
+            }
+            
+            # Add section metadata if available
+            if section.heading:
+                chunk_metadata.update({
+                    'section_title': section.heading.text,
+                    'section_level': section.heading.level
+                })
+            
             chunk = DocumentChunk(
                 id=str(uuid.uuid4()),
-                text=section['text'],
-                metadata=metadata
+                text=chunk_text,
+                metadata=chunk_metadata
             )
             chunks.append(chunk)
             
         return chunks
 
-    def _get_title_from_content(self, text: str) -> Optional[str]:
-        """Extract title from the first line of content if it looks like a title."""
+    def _get_title_from_content(self, text: str, filename: str) -> Optional[str]:
+        """Extract title from content or use filename as fallback."""
         if not text or not text.strip():
-            return None
+            return os.path.splitext(filename)[0]
             
         first_line = text.strip().split('\n')[0].strip()
         if not first_line:  # Skip empty lines
-            return None
+            return os.path.splitext(filename)[0]
             
         # Only consider it a title if it's short, doesn't end with punctuation,
-        # and contains words that might indicate it's a title (e.g., starts with capital letter)
+        # and contains words that might indicate it's a title
         if (len(first_line) <= 100 and 
             len(first_line) > 0 and  # Ensure line has content
             not first_line[-1] in '.!?' and 
             first_line[0].isupper() and
             not first_line.lower().startswith(('the ', 'this ', 'just ', 'test '))):
             return first_line
-        return None
-        
-    def _create_sections_from_analysis(
-        self, 
-        full_text: str, 
-        analysis: Dict, 
-        file_path: str, 
-        title: str, 
-        file_type: str,
-        fallback_sections: List[str]
-    ) -> List[Dict]:
-        """Create sections from document analysis with fallback handling."""
-        sections = []
-        source_name = os.path.basename(file_path)
-        
-        if analysis['headings']:
-            # Create sections based on headings
-            for i in range(len(analysis['headings'])):
-                start_pos = analysis['headings'][i]['start_pos']
-                end_pos = analysis['headings'][i+1]['start_pos'] if i < len(analysis['headings'])-1 else len(full_text)
-                section_text = full_text[start_pos:end_pos].strip()
-                
-                if section_text:
-                    # Get heading text from analysis
-                    heading_text = analysis['headings'][i]['text']
-                    sections.append({
-                        'text': section_text,
-                        'metadata': {
-                            'source_name': source_name,
-                            'title': title,
-                            'file_type': file_type,
-                            'section_type': 'content',
-                            'section_title': heading_text,  # Use original text to preserve section numbers
-                            'chunk_index': i,
-                            'total_chunks': len(analysis['headings'])
-                        }
-                    })
-        else:
-            # Fallback to provided sections
-            total_sections = len(fallback_sections)
-            for i, text in enumerate(fallback_sections):
-                if text.strip():
-                    sections.append({
-                        'text': text,
-                        'metadata': {
-                            'source_name': source_name,
-                            'title': title,
-                            'file_type': file_type,
-                            'section_type': 'content',
-                            'chunk_index': i,
-                            'total_chunks': total_sections
-                        }
-                    })
-        
-        return sections
+            
+        return os.path.splitext(filename)[0]
 
-    def _extract_pdf_text(self, file_path: str) -> Tuple[str, str, List[Dict]]:
+    def _extract_pdf_text(self, file_path: str) -> Tuple[str, str]:
         """Extract text and metadata from PDF file."""
         try:
             reader = PdfReader(file_path)
@@ -203,75 +166,32 @@ class DocumentProcessor:
             # If no metadata title, try to get from first page content
             if not title and total_pages > 0:
                 first_page_text = reader.pages[0].extract_text()
-                title = self._get_title_from_content(first_page_text)
-            
-            # Fallback to filename if no title found
-            if not title:
+                title = self._get_title_from_content(first_page_text, os.path.basename(file_path))
+            elif not title:
                 title = os.path.splitext(os.path.basename(file_path))[0]
 
             # Extract full text
             full_text = "\n".join(page.extract_text() for page in reader.pages)
             
-            # Analyze document structure
-            analysis = self.analyzer.analyze_document(full_text, title)
-            
-            # Create sections with page-based fallback
-            fallback_sections = [page.extract_text() for page in reader.pages]
-            sections = self._create_sections_from_analysis(
-                full_text=full_text,
-                analysis=analysis,
-                file_path=file_path,
-                title=title,
-                file_type='pdf',
-                fallback_sections=fallback_sections
-            )
+            logger.info(f"Extracted text from PDF: {len(full_text)} characters")
+            return title, full_text
             
         except Exception as e:
             raise ValueError(f"Error processing PDF: {str(e)}")
-            
-        return title, full_text, sections
-        
-    def _extract_docx_text(self, file_path: str) -> Tuple[str, str, List[Dict]]:
+
+    def _extract_docx_text(self, file_path: str) -> Tuple[str, str]:
         """Extract text and metadata from DOCX file."""
         try:
+            # Convert DOC to DOCX if needed
             if file_path.endswith('.doc'):
-                # Convert DOC to DOCX using LibreOffice
-                original_name = os.path.basename(file_path)
-                docx_name = original_name.rsplit('.', 1)[0] + '.docx'
-                docx_path = os.path.join('/app/tmp', docx_name)
-                
-                # Log current state
-                logger.info(f"Starting conversion of {file_path}")
-                logger.info(f"Expected output: {docx_path}")
-                logger.info(f"Current tmp contents: {os.listdir('/app/tmp')}")
-                
-                # Run LibreOffice conversion
-                result = subprocess.run(
-                    ['soffice', '--headless', '--convert-to', 'docx', '--outdir', '/app/tmp', file_path],
-                    capture_output=True,
-                    text=True,
-                    check=True
-                )
-                
-                # Log conversion results
-                logger.info(f"LibreOffice stdout: {result.stdout}")
-                if result.stderr:
-                    logger.warning(f"LibreOffice stderr: {result.stderr}")
-                logger.info(f"Tmp contents after conversion: {os.listdir('/app/tmp')}")
-                
-                # Verify conversion
-                if not os.path.exists(docx_path):
-                    raise ValueError(
-                        f"LibreOffice conversion failed. Expected file not found at {docx_path}. "
-                        f"Directory contents: {os.listdir('/app/tmp')}. "
-                        f"Command output: {result.stdout}. "
-                        f"Error output: {result.stderr}"
-                    )
-                
-                file_path = docx_path
+                logger.info(f"Converting DOC to DOCX: {file_path}")
+                docx_path = self._convert_doc_to_docx(file_path)
+            else:
+                docx_path = file_path
             
+            # Process DOCX file
             try:
-                doc = Document(file_path)
+                doc = Document(docx_path)
             except Exception as e:
                 logger.error(f"Failed to open DOCX file: {str(e)}")
                 raise ValueError(f"Failed to open DOCX file: {str(e)}")
@@ -286,36 +206,99 @@ class DocumentProcessor:
                 logger.warning(f"Error accessing document properties: {str(e)}")
                 title = ''
             
-            # If no title in properties, try to get from first paragraph
-            if not title and doc.paragraphs and len(doc.paragraphs) > 0:
-                first_para_text = doc.paragraphs[0].text
-                title = self._get_title_from_content(first_para_text)
+            # Extract text first so we can use it for title extraction if needed
+            paragraphs = [para.text for para in doc.paragraphs if para.text.strip()]
+            full_text = "\n".join(paragraphs)
             
-            # Fallback to filename if no title found
+            # If no title in properties, try to get from content
             if not title:
-                title = os.path.splitext(os.path.basename(file_path))[0]
-
-            # Extract full text
-            full_text = "\n".join(para.text for para in doc.paragraphs)
+                title = self._get_title_from_content(full_text, os.path.basename(file_path))
             
-            # Analyze document structure
-            analysis = self.analyzer.analyze_document(full_text, title)
+            logger.info(f"Extracted text from DOCX: {len(full_text)} characters")
             
-            # Create sections with paragraph-based fallback
-            fallback_sections = [para.text for para in doc.paragraphs if para.text.strip()]
-            sections = self._create_sections_from_analysis(
-                full_text=full_text,
-                analysis=analysis,
-                file_path=file_path,
-                title=title,
-                file_type='docx',
-                fallback_sections=fallback_sections
-            )
+            # Clean up temporary file if it was converted
+            if file_path.endswith('.doc') and os.path.exists(docx_path):
+                try:
+                    os.remove(docx_path)
+                except Exception as e:
+                    logger.warning(f"Failed to remove temporary DOCX file: {str(e)}")
+            
+            return title, full_text
             
         except Exception as e:
-            raise ValueError(f"Error processing DOCX: {str(e)}")
+            raise ValueError(f"Error processing Word document: {str(e)}")
+
+    def _convert_doc_to_docx(self, doc_path: str) -> str:
+        """Convert DOC file to DOCX format."""
+        try:
+            # Create temporary directory for conversion
+            with tempfile.TemporaryDirectory() as temp_dir:
+                # Generate output filename
+                docx_name = os.path.splitext(os.path.basename(doc_path))[0] + '.docx'
+                docx_path = os.path.join(temp_dir, docx_name)
+                
+                # Run LibreOffice conversion
+                result = subprocess.run(
+                    ['soffice', '--headless', '--convert-to', 'docx', '--outdir', temp_dir, doc_path],
+                    capture_output=True,
+                    text=True,
+                    check=True
+                )
+                
+                # Verify conversion
+                if not os.path.exists(docx_path):
+                    raise ValueError(
+                        f"LibreOffice conversion failed. Expected file not found at {docx_path}. "
+                        f"Command output: {result.stdout}. "
+                        f"Error output: {result.stderr}"
+                    )
+                
+                return docx_path
+                
+        except subprocess.CalledProcessError as e:
+            raise ValueError(f"DOC to DOCX conversion failed: {str(e)}")
+        except Exception as e:
+            raise ValueError(f"Error during DOC to DOCX conversion: {str(e)}")
+
+    def process_document(self, file_path: str) -> List[DocumentChunk]:
+        """Process a document file into chunks with metadata."""
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"File not found: {file_path}")
             
-        return title, full_text, sections
+        # Get original filename and extension for metadata
+        original_filename = os.path.basename(file_path)
+        file_ext = os.path.splitext(file_path)[1].lower()
+        
+        # Extract text based on file type
+        if file_ext == '.pdf':
+            title, full_text = self._extract_pdf_text(file_path)
+        elif file_ext in ['.doc', '.docx']:
+            title, full_text = self._extract_docx_text(file_path)
+        else:
+            raise ValueError(f"Unsupported file type: {file_ext}")
+            
+        # Analyze document structure and content
+        logger.info(f"Analyzing document: {title}")
+        analysis = self.analyzer.analyze_document(full_text, title)
+        logger.info(f"Document analysis complete")
+        
+        # Base metadata for all chunks
+        base_metadata = {
+            'source_name': original_filename,
+            'title': title,
+            'file_type': file_ext.lstrip('.'),
+            'classification': analysis['classification'],
+            'toc': json.dumps(analysis['toc'])  # Convert TOC to JSON string
+        }
+        
+        # Process each section into chunks
+        chunks = []
+        for section in analysis['sections']:
+            section_chunks = self._split_section(section, base_metadata)
+            chunks.extend(section_chunks)
+            
+        logger.info(f"Processed document into {len(chunks)} chunks")
+        return chunks
 
     def __del__(self):
         """Clean up by removing observer when object is destroyed."""
@@ -367,15 +350,11 @@ class DocumentStore:
             # Update state with chunk information
             state.chunk_count = len(chunks)
             state.total_chunks = len(chunks)
-            # Use original filename (not the converted one) as source name
             state.source_name = filename
-            # Add classification and TOC information
+            # Add classification and TOC information from first chunk's metadata
             if chunks:
                 state.classification = chunks[0].metadata['classification']
                 state.toc = json.loads(chunks[0].metadata['toc'])  # Parse JSON string back to list
-            # Update metadata to use original filename
-            for chunk in chunks:
-                chunk.metadata['source_name'] = filename
             self._update_processing_state(filename, state)
             
             # 2. Generate embeddings (single point of embedding generation)
@@ -399,7 +378,6 @@ class DocumentStore:
             existing_chunks = self.db.get_document_chunks(state.source_name)
             if existing_chunks:
                 logger.info(f"Found existing document with {len(existing_chunks)} chunks. Removing...")
-                # Get existing IDs and delete them
                 existing_ids = [chunk['id'] for chunk in existing_chunks]
                 self.db.collection.delete(ids=existing_ids)
                 logger.info(f"Deleted {len(existing_ids)} existing chunks")

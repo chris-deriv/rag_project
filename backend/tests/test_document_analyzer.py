@@ -1,6 +1,6 @@
 """Test document analyzer functionality."""
 import pytest
-from src.document_analyzer import DocumentAnalyzer, Heading
+from src.document_analyzer import DocumentAnalyzer, Heading, DocumentSection
 from src.config.constants import DOCUMENT_CLASSIFICATIONS
 
 @pytest.fixture
@@ -153,6 +153,69 @@ Section Header:
         assert analyzer.extract_headings("") == []
         assert analyzer.extract_headings("\n\n") == []
 
+class TestSectionExtraction:
+    def test_section_extraction_with_headings(self, analyzer):
+        """Test extraction of sections from document with headings."""
+        text = """# Main Title
+This is the introduction.
+
+## Section 1
+This is section 1 content.
+
+## Section 2
+This is section 2 content."""
+
+        headings = analyzer.extract_headings(text)
+        sections = analyzer.extract_sections(text, headings)
+        
+        assert len(sections) == 3  # Main + 2 sections
+        assert sections[0].text.startswith("# Main Title")
+        assert sections[1].text.startswith("## Section 1")
+        assert sections[2].text.startswith("## Section 2")
+        
+        # Verify section positions
+        assert sections[0].start_pos == 0
+        assert sections[0].end_pos < sections[1].start_pos
+        assert sections[1].end_pos < sections[2].start_pos
+        
+        # Verify heading references
+        assert sections[0].heading.text == "Main Title"
+        assert sections[0].heading.level == 1
+        assert sections[1].heading.text == "Section 1"
+        assert sections[1].heading.level == 2
+        assert sections[2].heading.text == "Section 2"
+        assert sections[2].heading.level == 2
+
+    def test_section_extraction_without_headings(self, analyzer):
+        """Test extraction of sections from document without headings."""
+        text = "This is a document without any headings.\nIt should be one section."
+        
+        sections = analyzer.extract_sections(text, [])
+        
+        assert len(sections) == 1
+        assert sections[0].text == text
+        assert sections[0].start_pos == 0
+        assert sections[0].end_pos == len(text)
+        assert sections[0].heading is None
+
+    def test_section_extraction_with_empty_sections(self, analyzer):
+        """Test handling of empty sections between headings."""
+        text = """# Title 1
+
+# Title 2
+
+# Title 3
+Content 3"""
+
+        headings = analyzer.extract_headings(text)
+        sections = analyzer.extract_sections(text, headings)
+        
+        # Should only include non-empty sections
+        assert len(sections) == 2  # Title 1 and Title 3 (with content)
+        assert sections[0].heading.text == "Title 1"
+        assert sections[1].heading.text == "Title 3"
+        assert "Content 3" in sections[1].text
+
 class TestTableOfContents:
     def test_toc_generation(self, analyzer):
         """Test generation of table of contents."""
@@ -225,18 +288,27 @@ The annual review process includes..."""
 
         result = analyzer.analyze_document(document, "HR Policy Manual")
         
-        assert 'classification' in result
+        # Verify classification
         assert result['classification'] == 'human_resources'
         
-        assert 'toc' in result
+        # Verify TOC structure
         assert len(result['toc']) == 1  # One top-level entry
         assert result['toc'][0]['text'] == "HR Policy Manual"
         assert len(result['toc'][0]['children']) == 2  # Two main sections
         
-        assert 'headings' in result
+        # Verify headings
         assert len(result['headings']) == 6  # Total number of headings
-        assert all(isinstance(h['text'], str) for h in result['headings'])
-        assert all(isinstance(h['level'], int) for h in result['headings'])
+        assert all(isinstance(h, Heading) for h in result['headings'])
+        assert result['headings'][0].text == "HR Policy Manual"
+        assert result['headings'][0].level == 1
+        
+        # Verify sections
+        assert len(result['sections']) == 6  # One section per heading
+        assert all(isinstance(s, DocumentSection) for s in result['sections'])
+        assert all(s.heading is not None for s in result['sections'])
+        assert result['sections'][0].heading.text == "HR Policy Manual"
+        assert "Code of Conduct" in result['sections'][2].heading.text
+        assert "guidelines" in result['sections'][2].text.lower()
 
     def test_error_handling(self, analyzer):
         """Test error handling in document analysis."""
@@ -245,9 +317,11 @@ The annual review process includes..."""
         assert result['classification'] == 'miscellaneous'
         assert result['toc'] == []
         assert result['headings'] == []
+        assert result['sections'] == []
 
         # Test with invalid input type
         result = analyzer.analyze_document(123, "Test")  # Non-string input
         assert result['classification'] == 'miscellaneous'
         assert result['toc'] == []
         assert result['headings'] == []
+        assert result['sections'] == []
