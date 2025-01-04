@@ -48,11 +48,8 @@ const api = {
       source_names,
       title
     });
-    // Return the response data which includes both the response text and table_of_contents
-    return {
-      content: response.data.response,
-      table_of_contents: response.data.table_of_contents
-    };
+    // Return the response data directly since it's already properly structured
+    return response.data;
   },
 
   // Reset database

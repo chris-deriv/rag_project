@@ -89,19 +89,24 @@ const ChatInterface = ({ selectedDocuments, onDocumentDelete }) => {
         null
       );
       // Ensure consistent content structure
-      const messageContent = typeof result.content === 'object' 
-        ? result.content.content 
-        : result.content;
+      const messageContent = typeof result.response?.content === 'object' 
+        ? result.response.content.content 
+        : result.response?.content;
+
+      const tocData = result.response?.table_of_contents;
+      const parsedToc = typeof tocData === 'string'
+        ? JSON.parse(tocData)
+        : tocData;
 
       setMessages(prev => [...prev, { 
         type: 'assistant', 
         content: messageContent,
-        toc: result.table_of_contents
+        toc: parsedToc
       }]);
       
       // Update current TOC if available
-      if (result.table_of_contents) {
-        setCurrentToc(result.table_of_contents);
+      if (parsedToc) {
+        setCurrentToc(parsedToc);
       }
     } catch (err) {
       // Extract error details
