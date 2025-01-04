@@ -137,9 +137,62 @@ class DocumentProcessor:
             return first_line
         return None
         
+    def _create_sections_from_analysis(
+        self, 
+        full_text: str, 
+        analysis: Dict, 
+        file_path: str, 
+        title: str, 
+        file_type: str,
+        fallback_sections: List[str]
+    ) -> List[Dict]:
+        """Create sections from document analysis with fallback handling."""
+        sections = []
+        source_name = os.path.basename(file_path)
+        
+        if analysis['headings']:
+            # Create sections based on headings
+            for i in range(len(analysis['headings'])):
+                start_pos = analysis['headings'][i]['start_pos']
+                end_pos = analysis['headings'][i+1]['start_pos'] if i < len(analysis['headings'])-1 else len(full_text)
+                section_text = full_text[start_pos:end_pos].strip()
+                
+                if section_text:
+                    # Get heading text from analysis
+                    heading_text = analysis['headings'][i]['text']
+                    sections.append({
+                        'text': section_text,
+                        'metadata': {
+                            'source_name': source_name,
+                            'title': title,
+                            'file_type': file_type,
+                            'section_type': 'content',
+                            'section_title': heading_text,  # Use original text to preserve section numbers
+                            'chunk_index': i,
+                            'total_chunks': len(analysis['headings'])
+                        }
+                    })
+        else:
+            # Fallback to provided sections
+            total_sections = len(fallback_sections)
+            for i, text in enumerate(fallback_sections):
+                if text.strip():
+                    sections.append({
+                        'text': text,
+                        'metadata': {
+                            'source_name': source_name,
+                            'title': title,
+                            'file_type': file_type,
+                            'section_type': 'content',
+                            'chunk_index': i,
+                            'total_chunks': total_sections
+                        }
+                    })
+        
+        return sections
+
     def _extract_pdf_text(self, file_path: str) -> Tuple[str, str, List[Dict]]:
         """Extract text and metadata from PDF file."""
-        sections = []
         try:
             reader = PdfReader(file_path)
             total_pages = len(reader.pages)
@@ -159,20 +212,20 @@ class DocumentProcessor:
             # Extract full text
             full_text = "\n".join(page.extract_text() for page in reader.pages)
             
-            for i, page in enumerate(reader.pages):
-                text = page.extract_text()
-                if text.strip():
-                    sections.append({
-                        'text': text,
-                        'metadata': {
-                            'source_name': os.path.basename(file_path),
-                            'title': title,
-                            'file_type': 'pdf',
-                            'section_type': 'content',
-                            'chunk_index': i,
-                            'total_chunks': total_pages
-                        }
-                    })
+            # Analyze document structure
+            analysis = self.analyzer.analyze_document(full_text, title)
+            
+            # Create sections with page-based fallback
+            fallback_sections = [page.extract_text() for page in reader.pages]
+            sections = self._create_sections_from_analysis(
+                full_text=full_text,
+                analysis=analysis,
+                file_path=file_path,
+                title=title,
+                file_type='pdf',
+                fallback_sections=fallback_sections
+            )
+            
         except Exception as e:
             raise ValueError(f"Error processing PDF: {str(e)}")
             
@@ -180,7 +233,6 @@ class DocumentProcessor:
         
     def _extract_docx_text(self, file_path: str) -> Tuple[str, str, List[Dict]]:
         """Extract text and metadata from DOCX file."""
-        sections = []
         try:
             if file_path.endswith('.doc'):
                 # Convert DOC to DOCX using LibreOffice
@@ -246,27 +298,20 @@ class DocumentProcessor:
             # Extract full text
             full_text = "\n".join(para.text for para in doc.paragraphs)
             
-            # Only include non-empty paragraphs and normalize indices
-            non_empty_sections = []
-            for para in doc.paragraphs:
-                text = para.text.strip()
-                if text:
-                    non_empty_sections.append(text)
+            # Analyze document structure
+            analysis = self.analyzer.analyze_document(full_text, title)
             
-            # Create sections with normalized indices
-            total_sections = len(non_empty_sections)
-            for i, text in enumerate(non_empty_sections):
-                sections.append({
-                    'text': text,
-                    'metadata': {
-                        'source_name': os.path.basename(file_path),
-                        'title': title,
-                        'file_type': 'docx',
-                        'section_type': 'content',
-                        'chunk_index': i,
-                        'total_chunks': total_sections
-                    }
-                })
+            # Create sections with paragraph-based fallback
+            fallback_sections = [para.text for para in doc.paragraphs if para.text.strip()]
+            sections = self._create_sections_from_analysis(
+                full_text=full_text,
+                analysis=analysis,
+                file_path=file_path,
+                title=title,
+                file_type='docx',
+                fallback_sections=fallback_sections
+            )
+            
         except Exception as e:
             raise ValueError(f"Error processing DOCX: {str(e)}")
             

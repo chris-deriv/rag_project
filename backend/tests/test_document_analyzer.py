@@ -30,22 +30,110 @@ Content 2"""
         assert [h.level for h in headings] == [1, 2, 3, 2]
 
     def test_numbered_headings(self, analyzer):
-        """Test extraction of numbered headings."""
+        """Test extraction of numbered headings with preserved numbers."""
         text = """1. First Section
 Content
-1.1. Subsection
+1.1. Subsection One
 More content
+1.2. Subsection Two
+Even more content
 2. Second Section
-Content"""
+Content
+2.1.a Additional Details
+Final content"""
         
         headings = analyzer.extract_headings(text)
-        assert len(headings) == 3
+        assert len(headings) == 5
         assert [h.text for h in headings] == [
-            'First Section',
-            'Subsection',
-            'Second Section'
+            '1 First Section',
+            '1.1 Subsection One',
+            '1.2 Subsection Two',
+            '2 Second Section',
+            '2.1.a Additional Details'
         ]
-        assert [h.level for h in headings] == [1, 2, 1]
+        assert [h.level for h in headings] == [1, 2, 2, 1, 3]
+
+    def test_section_number_formats(self, analyzer):
+        """Test various section number formats."""
+        text = """A. Overview
+A.1. Background
+A.1.1. Historical Context
+I. Major Section
+I.1. Subsection
+1.a Additional Point
+Section 2.1: Methodology
+Chapter 3: Results
+Appendix B.1: References"""
+        
+        headings = analyzer.extract_headings(text)
+        
+        # Verify section numbers are preserved
+        texts = [h.text for h in headings]
+        assert 'A Overview' in texts
+        assert 'A.1 Background' in texts
+        assert 'A.1.1 Historical Context' in texts
+        assert 'I Major Section' in texts
+        assert 'I.1 Subsection' in texts
+        assert '1.a Additional Point' in texts
+        assert 'Section 2.1 Methodology' in texts
+        assert 'Chapter 3 Results' in texts
+        assert 'Appendix B.1 References' in texts
+        
+        # Verify correct level assignment
+        levels = [h.level for h in headings]
+        assert levels[0] == 1  # A
+        assert levels[1] == 2  # A.1
+        assert levels[2] == 3  # A.1.1
+        assert levels[3] == 2  # I (Roman numerals are major sections)
+        assert levels[4] == 3  # I.1
+        assert levels[5] == 2  # 1.a
+        assert levels[6] == 2  # Section 2.1
+        assert levels[7] == 1  # Chapter 3
+        assert levels[8] == 2  # Appendix B.1
+
+    def test_mixed_document_format(self, analyzer):
+        """Test consistent heading extraction across document formats."""
+        text = """# Main Title
+
+1. Introduction
+This is an introduction.
+
+1.1. Background
+Some background information.
+
+Section 2: Methodology
+The methodology section.
+
+2.1. Process Steps
+Step by step guide.
+
+RESULTS AND DISCUSSION
+Important findings.
+
+Appendix A.1: Data Tables
+Reference data."""
+        
+        headings = analyzer.extract_headings(text)
+        
+        # Verify all heading styles are captured
+        texts = [h.text for h in headings]
+        assert 'Main Title' in texts  # Markdown
+        assert '1 Introduction' in texts  # Numbered
+        assert '1.1 Background' in texts  # Sub-numbered
+        assert 'Section 2 Methodology' in texts  # Section format
+        assert '2.1 Process Steps' in texts  # Sub-numbered
+        assert 'RESULTS AND DISCUSSION' in texts  # All caps
+        assert 'Appendix A.1 Data Tables' in texts  # Appendix format
+        
+        # Verify proper hierarchy
+        levels = [h.level for h in headings]
+        assert levels[0] == 1  # Main Title
+        assert levels[1] == 1  # 1. Introduction
+        assert levels[2] == 2  # 1.1. Background
+        assert levels[3] == 1  # Section 2
+        assert levels[4] == 2  # 2.1. Process
+        assert levels[5] == 1  # RESULTS
+        assert levels[6] == 2  # Appendix A.1
 
     def test_mixed_heading_styles(self, analyzer):
         """Test extraction of mixed heading styles."""

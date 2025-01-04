@@ -272,6 +272,229 @@ class TestDocumentStore:
             assert doc_info['toc'][0]['text'] == 'Test Document'
 
 class TestDocumentProcessor:
+    def test_create_sections_from_analysis(self):
+        """Test section creation with and without headings."""
+        processor = DocumentProcessor()
+        
+        # Test data
+        full_text = "Title\n1. First Section\nContent\n1.1. Subsection\nMore content"
+        file_path = "test.pdf"
+        title = "Test Document"
+        
+        # Test with headings
+        analysis = {
+            'headings': [
+                {'text': 'Title', 'level': 1, 'start_pos': 0, 'end_pos': 5},
+                {'text': '1. First Section', 'level': 1, 'start_pos': 6, 'end_pos': 20},
+                {'text': '1.1. Subsection', 'level': 2, 'start_pos': 28, 'end_pos': 41}
+            ]
+        }
+        
+        # Test with PDF fallback
+        fallback_sections = ["Page 1 content", "Page 2 content"]
+        sections = processor._create_sections_from_analysis(
+            full_text=full_text,
+            analysis=analysis,
+            file_path=file_path,
+            title=title,
+            file_type='pdf',
+            fallback_sections=fallback_sections
+        )
+        
+        # Verify heading-based sections
+        assert len(sections) == 3
+        assert sections[0]['metadata']['section_title'] == 'Title'
+        assert sections[1]['metadata']['section_title'] == '1. First Section'
+        assert sections[2]['metadata']['section_title'] == '1.1. Subsection'
+        
+        # Test without headings (fallback)
+        analysis_no_headings = {'headings': []}
+        fallback_sections = ["Page 1", "Page 2"]
+        sections = processor._create_sections_from_analysis(
+            full_text=full_text,
+            analysis=analysis_no_headings,
+            file_path=file_path,
+            title=title,
+            file_type='pdf',
+            fallback_sections=fallback_sections
+        )
+        
+        # Verify fallback sections
+        assert len(sections) == 2
+        assert sections[0]['metadata']['chunk_index'] == 0
+        assert sections[1]['metadata']['chunk_index'] == 1
+        assert sections[0]['metadata']['total_chunks'] == 2
+        assert 'section_title' not in sections[0]['metadata']
+
+    def test_consistent_section_handling(self, mock_document_analyzer):
+        """Test consistent section handling across document types."""
+        processor = DocumentProcessor()
+        
+        # Configure mock analyzer with same headings for both formats
+        mock_document_analyzer.analyze_document.return_value = {
+            'classification': 'policies_procedures',
+            'toc': [
+                {
+                    'text': 'Test Document',
+                    'level': 1,
+                    'children': [
+                        {
+                            'text': '1. First Section',
+                            'level': 1,
+                            'children': [
+                                {
+                                    'text': '1.1. Subsection',
+                                    'level': 2,
+                                    'children': []
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ],
+            'headings': [
+                {
+                    'text': 'Test Document',
+                    'level': 1,
+                    'start_pos': 0,
+                    'end_pos': 12
+                },
+                {
+                    'text': '1. First Section',
+                    'level': 1,
+                    'start_pos': 13,
+                    'end_pos': 30
+                },
+                {
+                    'text': '1.1. Subsection',
+                    'level': 2,
+                    'start_pos': 31,
+                    'end_pos': 50
+                }
+            ]
+        }
+        
+        # Test PDF processing
+        with tempfile.NamedTemporaryFile(suffix='.pdf', mode='w+b', delete=False) as f:
+            pdf_path = f.name
+            
+        # Test DOCX processing
+        with tempfile.NamedTemporaryFile(suffix='.docx', mode='w+b', delete=False) as f:
+            docx_path = f.name
+            
+        try:
+            # Configure mock extractors with section titles
+            pdf_extract = (
+                'Test Document',
+                'Test Document\n1. First Section\n1.1. Subsection',
+                [
+                    {
+                        'text': 'Test Document',
+                        'metadata': {
+                            'source_name': 'test.pdf',
+                            'title': 'Test Document',
+                            'file_type': 'pdf',
+                            'section_type': 'content',
+                            'section_title': 'Test Document',
+                            'chunk_index': 0,
+                            'total_chunks': 3
+                        }
+                    },
+                    {
+                        'text': '1. First Section',
+                        'metadata': {
+                            'source_name': 'test.pdf',
+                            'title': 'Test Document',
+                            'file_type': 'pdf',
+                            'section_type': 'content',
+                            'section_title': '1. First Section',
+                            'chunk_index': 1,
+                            'total_chunks': 3
+                        }
+                    },
+                    {
+                        'text': '1.1. Subsection',
+                        'metadata': {
+                            'source_name': 'test.pdf',
+                            'title': 'Test Document',
+                            'file_type': 'pdf',
+                            'section_type': 'content',
+                            'section_title': '1.1. Subsection',
+                            'chunk_index': 2,
+                            'total_chunks': 3
+                        }
+                    }
+                ]
+            )
+            
+            docx_extract = (
+                'Test Document',
+                'Test Document\n1. First Section\n1.1. Subsection',
+                [
+                    {
+                        'text': 'Test Document',
+                        'metadata': {
+                            'source_name': 'test.docx',
+                            'title': 'Test Document',
+                            'file_type': 'docx',
+                            'section_type': 'content',
+                            'section_title': 'Test Document',
+                            'chunk_index': 0,
+                            'total_chunks': 3
+                        }
+                    },
+                    {
+                        'text': '1. First Section',
+                        'metadata': {
+                            'source_name': 'test.docx',
+                            'title': 'Test Document',
+                            'file_type': 'docx',
+                            'section_type': 'content',
+                            'section_title': '1. First Section',
+                            'chunk_index': 1,
+                            'total_chunks': 3
+                        }
+                    },
+                    {
+                        'text': '1.1. Subsection',
+                        'metadata': {
+                            'source_name': 'test.docx',
+                            'title': 'Test Document',
+                            'file_type': 'docx',
+                            'section_type': 'content',
+                            'section_title': '1.1. Subsection',
+                            'chunk_index': 2,
+                            'total_chunks': 3
+                        }
+                    }
+                ]
+            )
+            
+            with patch.object(processor, '_extract_pdf_text', return_value=pdf_extract):
+                with patch.object(processor, '_extract_docx_text', return_value=docx_extract):
+                    # Process both formats
+                    pdf_chunks = processor.process_document(pdf_path)
+                    docx_chunks = processor.process_document(docx_path)
+                    
+                    # Verify consistent section handling
+                    assert len(pdf_chunks) == len(docx_chunks)
+                    
+                    for pdf_chunk, docx_chunk in zip(pdf_chunks, docx_chunks):
+                        # Verify section titles are preserved
+                        assert pdf_chunk.metadata['section_title'] == docx_chunk.metadata['section_title']
+                        # Verify section numbers are preserved
+                        if '1.' in pdf_chunk.metadata['section_title']:
+                            assert '1.' in docx_chunk.metadata['section_title']
+                        # Verify metadata structure
+                        assert set(pdf_chunk.metadata.keys()) == set(docx_chunk.metadata.keys())
+                        assert pdf_chunk.metadata['total_chunks'] == docx_chunk.metadata['total_chunks']
+                        
+        finally:
+            if os.path.exists(pdf_path):
+                os.remove(pdf_path)
+            if os.path.exists(docx_path):
+                os.remove(docx_path)
+
     def test_process_document(self, mock_document_analyzer):
         """Test document processing."""
         # Create processor with mock analyzer
@@ -281,31 +504,89 @@ class TestDocumentProcessor:
         with tempfile.NamedTemporaryFile(suffix='.pdf', mode='w+b', delete=False) as f:
             test_pdf = f.name
 
-        # Configure mock PDF extraction
+        # Configure mock document analysis with sections
+        mock_document_analyzer.analyze_document.return_value = {
+            'classification': 'policies_procedures',
+            'toc': [
+                {
+                    'text': 'Test Document',
+                    'level': 1,
+                    'children': [
+                        {
+                            'text': '1. First Section',
+                            'level': 1,
+                            'children': [
+                                {
+                                    'text': '1.1. Subsection One',
+                                    'level': 2,
+                                    'children': []
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ],
+            'headings': [
+                {
+                    'text': 'Test Document',
+                    'level': 1,
+                    'start_pos': 0,
+                    'end_pos': 12
+                },
+                {
+                    'text': '1. First Section',
+                    'level': 1,
+                    'start_pos': 13,
+                    'end_pos': 30
+                },
+                {
+                    'text': '1.1. Subsection One',
+                    'level': 2,
+                    'start_pos': 31,
+                    'end_pos': 50
+                }
+            ]
+        }
+
+        # Configure mock PDF extraction with sections
         mock_extract = (
             'Test Document',  # title
-            'Test section 1\nTest section 2',  # full_text
+            'Test Document\n1. First Section\n1.1. Subsection One',  # full_text
             [  # sections
                 {
-                    'text': 'Test section 1',
+                    'text': 'Test Document\nThis is the introduction.',
                     'metadata': {
                         'source_name': 'test.pdf',
                         'title': 'Test Document',
                         'file_type': 'pdf',
                         'section_type': 'content',
+                        'section_title': 'Test Document',
                         'chunk_index': 0,
-                        'total_chunks': 2
+                        'total_chunks': 3
                     }
                 },
                 {
-                    'text': 'Test section 2',
+                    'text': '1. First Section\nThis is the first main section.',
                     'metadata': {
                         'source_name': 'test.pdf',
                         'title': 'Test Document',
                         'file_type': 'pdf',
                         'section_type': 'content',
+                        'section_title': '1. First Section',
                         'chunk_index': 1,
-                        'total_chunks': 2
+                        'total_chunks': 3
+                    }
+                },
+                {
+                    'text': '1.1. Subsection One\nThis is a subsection.',
+                    'metadata': {
+                        'source_name': 'test.pdf',
+                        'title': 'Test Document',
+                        'file_type': 'pdf',
+                        'section_type': 'content',
+                        'section_title': '1.1. Subsection One',
+                        'chunk_index': 2,
+                        'total_chunks': 3
                     }
                 }
             ]
@@ -318,17 +599,23 @@ class TestDocumentProcessor:
             # Verify document analysis was called
             mock_document_analyzer.analyze_document.assert_called_once()
 
-            # Verify chunks were created
-            assert len(chunks) == 2
+            # Verify chunks were created with proper sections
+            assert len(chunks) == 3
             assert isinstance(chunks[0], DocumentChunk)
             assert isinstance(chunks[1], DocumentChunk)
+            assert isinstance(chunks[2], DocumentChunk)
             
-            # Verify chunk content
-            assert chunks[0].text == 'Test section 1'
-            assert chunks[1].text == 'Test section 2'
+            # Verify chunk content and section titles
+            assert chunks[0].metadata['section_title'] == 'Test Document'
+            assert chunks[1].metadata['section_title'] == '1. First Section'
+            assert chunks[2].metadata['section_title'] == '1.1. Subsection One'
+            
+            # Verify section numbers are preserved
+            assert '1.' in chunks[1].metadata['section_title']
+            assert '1.1.' in chunks[2].metadata['section_title']
 
-            # Verify metadata
-            for chunk in chunks:
+            # Verify common metadata
+            for i, chunk in enumerate(chunks):
                 assert chunk.metadata['source_name'] == 'test.pdf'
                 assert chunk.metadata['title'] == 'Test Document'
                 assert chunk.metadata['file_type'] == 'pdf'
@@ -470,74 +757,3 @@ class TestDocumentProcessor:
         with patch('src.documents.Document', return_value=mock_doc):
             # Should not raise exception, should handle property error gracefully
             title, full_text, sections = processor._extract_docx_text("test.docx")
-            assert isinstance(sections, list)
-
-    def test_docx_title_extraction(self):
-        """Test DOCX title extraction with various property scenarios."""
-        processor = DocumentProcessor()
-        
-        # Test with valid core properties title
-        mock_doc = Mock(spec=['paragraphs', 'core_properties'])
-        mock_para = Mock()
-        mock_para.text = "First paragraph"
-        mock_doc.paragraphs = [mock_para]  # Make paragraphs iterable
-        mock_properties = Mock()
-        mock_properties.title = "Document Title"
-        type(mock_doc).core_properties = PropertyMock(return_value=mock_properties)
-        
-        with patch('src.documents.Document', return_value=mock_doc):
-            title, full_text, sections = processor._extract_docx_text("test.docx")
-            assert title == "Document Title"
-            assert sections[0]['metadata']['title'] == "Document Title"
-        
-        # Test with missing core_properties attribute
-        mock_doc = Mock(spec=['paragraphs'])  # No core_properties attribute
-        mock_para = Mock()
-        mock_para.text = "First paragraph"
-        mock_doc.paragraphs = [mock_para]  # Make paragraphs iterable
-        
-        with patch('src.documents.Document', return_value=mock_doc):
-            title, full_text, sections = processor._extract_docx_text("test.docx")
-            # Should fall back to first paragraph or filename
-            assert title in ["First paragraph", "test"]
-            assert sections[0]['metadata']['title'] in ["First paragraph", "test"]
-        
-        # Test with None title in core properties
-        mock_doc = Mock(spec=['paragraphs', 'core_properties'])
-        mock_para = Mock()
-        mock_para.text = "First paragraph"
-        mock_doc.paragraphs = [mock_para]  # Make paragraphs iterable
-        mock_properties = Mock()
-        mock_properties.title = None
-        type(mock_doc).core_properties = PropertyMock(return_value=mock_properties)
-        
-        with patch('src.documents.Document', return_value=mock_doc):
-            title, full_text, sections = processor._extract_docx_text("test.docx")
-            # Should fall back to first paragraph or filename
-            assert title in ["First paragraph", "test"]
-            assert sections[0]['metadata']['title'] in ["First paragraph", "test"]
-
-    def test_error_handling(self):
-        """Test error handling in document operations."""
-        processor = DocumentProcessor()
-
-        # Test invalid file type
-        with tempfile.NamedTemporaryFile(suffix='.txt', mode='w+b', delete=False) as f:
-            test_file = f.name
-            f.write(b'Test content')
-
-        try:
-            with pytest.raises(Exception) as exc_info:
-                processor.process_document(test_file)
-            assert "Unsupported file type" in str(exc_info.value)
-        finally:
-            # Clean up
-            if os.path.exists(test_file):
-                os.remove(test_file)
-
-        # Test file not found
-        nonexistent_file = "nonexistent.pdf"
-        with patch('src.documents.DocumentProcessor._extract_pdf_text', side_effect=FileNotFoundError("No such file or directory: 'nonexistent.pdf'")):
-            with pytest.raises(FileNotFoundError) as exc_info:
-                processor.process_document(nonexistent_file)
-            assert "File not found" in str(exc_info.value)

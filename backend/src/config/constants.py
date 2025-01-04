@@ -24,12 +24,31 @@ DOCUMENT_CLASSIFICATIONS = {
 
 # Document Structure
 HEADING_PATTERNS = [
+    # Numbered section patterns (capture both number and text)
+    r'^(\d+\.(?:\d+)*)\s+(.+)$',  # Basic numbered (1.1, 1.2.3, etc.)
+    r'^(\d+\.(?:\d+)*[A-Za-z]?)\s+(.+)$',  # With optional letter (1.1a, 2.3b)
+    r'^([A-Z]\.(?:\d+)*)\s+(.+)$',  # Letter-based (A.1, B.2.1)
+    
+    # Standard heading markers
     r'^#{1,6}\s+(.+)$',  # Markdown headings
-    r'^(\d+\.(?:\d+)*)\s+(.+)$',  # Numbered headings (1.1, 1.2, etc.)
-    r'^[A-Z][A-Za-z\s]+:$',  # Title case followed by colon
-    r'^[A-Z][A-Z\s]+(?:\s|$)',  # All caps text
-    r'^(?:Section|Chapter|Part)\s+\d+:?\s*(.+)$',  # Section/Chapter headings
+    
+    # Common document sections (capture number and text)
+    r'^(?:Section|Chapter|Part)\s+(\d+(?:\.\d+)*):?\s*(.+)$',  # Section 1.1: Title
+    r'^(?:Appendix)\s+([A-Z](?:\.\d+)*):?\s*(.+)$',  # Appendix A.1: Title
+    
+    # Special formats
+    r'^([IVX]+\.(?:\d+)*)\s+(.+)$',  # Roman numerals (I.1, IV.2)
+    r'^([A-Z][A-Za-z\s]+):\s*(.+)$',  # Title case with content: Text
+    r'^([A-Z][A-Z\s]+(?:\s|$))(.+)?$'  # All caps with optional content
 ]
+
+# Section number format mapping
+SECTION_NUMBER_FORMATS = {
+    'numeric': r'^\d+\.(?:\d+)*$',  # 1.1, 1.2.3
+    'alpha': r'^[A-Z]\.(?:\d+)*$',  # A.1, B.2.1
+    'roman': r'^[IVX]+\.(?:\d+)*$',  # I.1, IV.2.1
+    'mixed': r'^\d+\.(?:\d+)*[A-Za-z]?$'  # 1.1a, 2.3b
+}
 
 # API Response Keys
 RESPONSE_KEYS = {

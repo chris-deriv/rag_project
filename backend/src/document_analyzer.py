@@ -3,7 +3,11 @@ import re
 from typing import List, Dict, Optional, Tuple
 from dataclasses import dataclass
 import logging
-from .config.constants import DOCUMENT_CLASSIFICATIONS, HEADING_PATTERNS
+from .config.constants import (
+    DOCUMENT_CLASSIFICATIONS,
+    HEADING_PATTERNS,
+    SECTION_NUMBER_FORMATS
+)
 
 logger = logging.getLogger(__name__)
 
@@ -29,8 +33,24 @@ class DocumentAnalyzer:
         """Initialize the document analyzer."""
         self.heading_patterns = [re.compile(pattern) for pattern in HEADING_PATTERNS]
         
+    def _get_section_level(self, section_number: str) -> int:
+        """Determine heading level from section number format."""
+        if not section_number:
+            return 1
+            
+        # Check each section number format
+        for format_name, pattern in SECTION_NUMBER_FORMATS.items():
+            if re.match(pattern, section_number):
+                if format_name in ['numeric', 'alpha', 'mixed']:
+                    # Count dots for hierarchical depth
+                    return section_number.count('.') + 1
+                elif format_name == 'roman':
+                    # Roman numerals usually indicate major sections
+                    return section_number.count('.') + 2
+        return 1
+
     def extract_headings(self, text: str) -> List[Heading]:
-        """Extract headings from document text."""
+        """Extract headings from document text with preserved section numbers."""
         headings = []
         lines = text.split('\n')
         current_pos = 0
@@ -41,46 +61,43 @@ class DocumentAnalyzer:
             if not line:
                 current_pos += len(original_line) + 1
                 continue
-                
-            # Check for numbered headings first (e.g., "1.", "1.1.", "1.1.1.")
-            number_match = re.match(r'^(\d+\.)+\s*(.+)$', line)
-            if number_match:
-                # Count dots to determine level
-                level = line[:number_match.start(2)].count('.')
-                heading_text = number_match.group(2).strip()
-                heading = Heading(
-                    text=heading_text,
-                    level=level,
-                    start_pos=current_pos,
-                    end_pos=current_pos + len(original_line)
-                )
-                headings.append(heading)
-                current_pos += len(original_line) + 1
-                continue
-                
-            # Check each heading pattern
+            
+            heading_found = False
+            # Try each heading pattern
             for pattern in self.heading_patterns:
-                match = pattern.match(line)
+                match = re.match(pattern, line)
                 if match:
-                    # Determine heading level and text
                     if line.startswith('#'):
+                        # Markdown heading
                         level = len(line) - len(line.lstrip('#'))
                         heading_text = line.lstrip('#').strip()
+                        section_number = ''
+                    elif len(match.groups()) == 2:
+                        # Pattern with section number and text
+                        section_number = match.group(1).strip()
+                        heading_text = match.group(2).strip()
+                        level = self._get_section_level(section_number)
                     else:
+                        # Pattern with just text (e.g., ALL CAPS)
+                        heading_text = match.group(1).strip()
+                        section_number = ''
                         level = 1
-                        heading_text = line.rstrip(':').strip()
+                    
+                    # Combine section number and text if both exist
+                    full_text = f"{section_number} {heading_text}" if section_number else heading_text
                     
                     heading = Heading(
-                        text=heading_text,
+                        text=full_text.strip(),
                         level=level,
                         start_pos=current_pos,
                         end_pos=current_pos + len(original_line)
                     )
                     headings.append(heading)
+                    heading_found = True
                     break
-                    
-            current_pos += len(original_line) + 1
             
+            current_pos += len(original_line) + 1
+        
         return headings
 
     def build_toc(self, headings: List[Heading]) -> List[Dict]:
