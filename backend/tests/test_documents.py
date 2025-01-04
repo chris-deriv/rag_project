@@ -2,6 +2,7 @@
 import pytest
 import tempfile
 import os
+import json
 from unittest.mock import Mock, patch, PropertyMock
 import numpy as np
 from src.documents import DocumentStore, DocumentProcessor, DocumentChunk, ProcessingState
@@ -102,7 +103,7 @@ class TestDocumentStore:
                 'chunk_index': 0,
                 'total_chunks': 2,
                 'classification': 'policies_procedures',
-                'toc': [{'text': 'Test Document', 'level': 1, 'children': []}]
+                'toc': json.dumps([{'text': 'Test Document', 'level': 1, 'children': []}])  # TOC as JSON string
             },
             {
                 'id': 2,
@@ -110,7 +111,7 @@ class TestDocumentStore:
                 'chunk_index': 1,
                 'total_chunks': 2,
                 'classification': 'policies_procedures',
-                'toc': [{'text': 'Test Document', 'level': 1, 'children': []}]
+                'toc': json.dumps([{'text': 'Test Document', 'level': 1, 'children': []}])  # TOC as JSON string
             }
         ]
 
@@ -147,6 +148,10 @@ class TestDocumentStore:
             assert all(chunk['total_chunks'] == 2 for chunk in stored_chunks)
             assert all(chunk['classification'] == 'policies_procedures' for chunk in stored_chunks)
             assert all('toc' in chunk for chunk in stored_chunks)
+            # Verify TOC is stored as JSON string
+            assert all(isinstance(chunk['toc'], str) for chunk in stored_chunks)
+            # Verify TOC can be parsed back to list
+            assert all(isinstance(json.loads(chunk['toc']), list) for chunk in stored_chunks)
 
             # Verify embeddings were generated once
             mock_embedding_generator.generate_embeddings.assert_called_once()
@@ -159,6 +164,10 @@ class TestDocumentStore:
             assert added_docs[1]['text'] == 'Test section 2'
             assert all('classification' in doc for doc in added_docs)
             assert all('toc' in doc for doc in added_docs)
+            # Verify TOC is stored as JSON string
+            assert all(isinstance(doc['toc'], str) for doc in added_docs)
+            # Verify TOC can be parsed back to list
+            assert all(isinstance(json.loads(doc['toc']), list) for doc in added_docs)
 
         finally:
             # Clean up
@@ -191,7 +200,7 @@ class TestDocumentStore:
 
     def test_get_documents(self):
         """Test retrieving documents from the store."""
-        # Create mock documents
+        # Create mock documents with TOC as JSON string
         mock_docs = [
             {
                 'source_name': 'test1.pdf',
@@ -199,7 +208,7 @@ class TestDocumentStore:
                 'chunk_count': 5,
                 'total_chunks': 5,
                 'classification': 'policies_procedures',
-                'toc': [{'text': 'Test Document 1', 'level': 1, 'children': []}]
+                'toc': json.dumps([{'text': 'Test Document 1', 'level': 1, 'children': []}])
             },
             {
                 'source_name': 'test2.pdf',
@@ -207,7 +216,7 @@ class TestDocumentStore:
                 'chunk_count': 3,
                 'total_chunks': 3,
                 'classification': 'human_resources',
-                'toc': [{'text': 'Test Document 2', 'level': 1, 'children': []}]
+                'toc': json.dumps([{'text': 'Test Document 2', 'level': 1, 'children': []}])
             }
         ]
 
@@ -226,6 +235,41 @@ class TestDocumentStore:
             assert documents[1]['source_name'] == 'test2.pdf'
             assert all('classification' in doc for doc in documents)
             assert all('toc' in doc for doc in documents)
+            # Verify TOC is stored as JSON string
+            assert all(isinstance(doc['toc'], str) for doc in documents)
+            # Verify TOC can be parsed back to list
+            assert all(isinstance(json.loads(doc['toc']), list) for doc in documents)
+
+    def test_get_document_info_toc_handling(self):
+        """Test TOC handling in get_document_info."""
+        # Create mock chunks with TOC as JSON string
+        mock_chunks = [{
+            'source_name': 'test.pdf',
+            'title': 'Test Document',
+            'chunk_count': 1,
+            'total_chunks': 1,
+            'classification': 'policies_procedures',
+            'toc': json.dumps([{'text': 'Test Document', 'level': 1, 'children': []}])
+        }]
+
+        # Create mock VectorDatabase
+        mock_vector_db = Mock()
+        mock_vector_db.get_document_chunks = Mock(return_value=mock_chunks)
+
+        # Initialize store with mocked database
+        with patch('src.documents.VectorDatabase', return_value=mock_vector_db):
+            store = DocumentStore()
+            doc_info = store.get_document_info('test.pdf')
+
+            # Verify document info
+            assert doc_info is not None
+            assert doc_info['source_name'] == 'test.pdf'
+            assert doc_info['title'] == 'Test Document'
+            assert doc_info['classification'] == 'policies_procedures'
+            # Verify TOC is parsed back to list
+            assert isinstance(doc_info['toc'], list)
+            assert len(doc_info['toc']) == 1
+            assert doc_info['toc'][0]['text'] == 'Test Document'
 
 class TestDocumentProcessor:
     def test_process_document(self, mock_document_analyzer):
@@ -291,7 +335,13 @@ class TestDocumentProcessor:
                 assert chunk.metadata['section_type'] == 'content'
                 assert chunk.metadata['classification'] == 'policies_procedures'
                 assert 'toc' in chunk.metadata
-                assert len(chunk.metadata['toc']) == 1
+                # Verify TOC is stored as JSON string
+                assert isinstance(chunk.metadata['toc'], str)
+                # Verify TOC can be parsed back to list
+                toc = json.loads(chunk.metadata['toc'])
+                assert isinstance(toc, list)
+                assert len(toc) == 1
+                assert toc[0]['text'] == 'Test Document'
 
         finally:
             # Clean up

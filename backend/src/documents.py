@@ -1,6 +1,7 @@
 """Document processing for the RAG application with advanced chunking strategies."""
 import os
 import uuid
+import json
 from typing import List, Dict, Optional, BinaryIO, Union, Any, Tuple
 from dataclasses import dataclass, asdict
 import re
@@ -106,7 +107,7 @@ class DocumentProcessor:
             metadata = section['metadata']
             metadata.update({
                 'classification': analysis['classification'],
-                'toc': analysis['toc']
+                'toc': json.dumps(analysis['toc'])  # Convert TOC to JSON string
             })
             chunk = DocumentChunk(
                 id=str(uuid.uuid4()),
@@ -326,7 +327,7 @@ class DocumentStore:
             # Add classification and TOC information
             if chunks:
                 state.classification = chunks[0].metadata['classification']
-                state.toc = chunks[0].metadata['toc']
+                state.toc = json.loads(chunks[0].metadata['toc'])  # Parse JSON string back to list
             # Update metadata to use original filename
             for chunk in chunks:
                 chunk.metadata['source_name'] = filename
@@ -415,13 +416,18 @@ class DocumentStore:
         if not chunks:
             return None
             
+        # Parse TOC JSON string back to list
+        toc = chunks[0].get('toc')
+        if isinstance(toc, str):
+            toc = json.loads(toc)
+            
         return {
             'source_name': source_name,
             'title': chunks[0].get('title', ''),
             'chunk_count': len(chunks),
             'total_chunks': chunks[0].get('total_chunks', len(chunks)),
             'classification': chunks[0].get('classification'),
-            'toc': chunks[0].get('toc')
+            'toc': toc
         }
 
 # Initialize global document store
