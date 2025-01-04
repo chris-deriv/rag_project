@@ -68,7 +68,7 @@ EMBEDDING_MODEL_NAME = get_env_str("EMBEDDING_MODEL_NAME", "all-MiniLM-L6-v2")
 ALLOWED_EXTENSIONS = {'pdf', 'docx', 'doc'}
 
 # Default values for dynamic settings
-DEFAULT_MODEL = get_env_str("OPENAI_MODEL", "gpt-3.5-turbo")
+DEFAULT_MODEL = get_env_str("OPENAI_MODEL", "gpt-4")
 DEFAULT_TEMPERATURE = get_env_float("DEFAULT_TEMPERATURE", 0.3)
 DEFAULT_MAX_TOKENS = get_env_int("DEFAULT_MAX_TOKENS", 1000)
 DEFAULT_CHUNK_SIZE = get_env_int("DEFAULT_CHUNK_SIZE", 500)
