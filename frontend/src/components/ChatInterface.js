@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import TableOfContents from './TableOfContents';
 import {
   TextField,
   Button,
@@ -27,6 +28,7 @@ const ChatInterface = ({ selectedDocuments, onDocumentDelete }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [viewMode, setViewMode] = useState('markdown'); // 'markdown' or 'latex'
+  const [currentToc, setCurrentToc] = useState(null);
   const messagesEndRef = useRef(null);
 
   const scrollToBottom = () => {
@@ -51,7 +53,16 @@ const ChatInterface = ({ selectedDocuments, onDocumentDelete }) => {
         selectedDocuments.map(doc => doc.source_name),
         null
       );
-      setMessages(prev => [...prev, { type: 'assistant', content: result.response }]);
+      setMessages(prev => [...prev, { 
+        type: 'assistant', 
+        content: result.content,
+        toc: result.table_of_contents
+      }]);
+      
+      // Update current TOC if available
+      if (result.table_of_contents) {
+        setCurrentToc(result.table_of_contents);
+      }
     } catch (err) {
       const errorMessage = err.response?.data?.error || 'Error getting response';
       setError(errorMessage);
@@ -373,7 +384,8 @@ ${markdownToLatex(message.content)}
   };
 
   return (
-    <Paper elevation={3} sx={{ p: 3, height: '100%', display: 'flex', flexDirection: 'column' }}>
+    <Box sx={{ display: 'flex', gap: 2, height: '100%' }}>
+      <Paper elevation={3} sx={{ p: 3, height: '100%', display: 'flex', flexDirection: 'column', flex: 1 }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
         <Typography variant="h6" component="h2">
           Chat
@@ -566,7 +578,12 @@ ${markdownToLatex(message.content)}
           {error}
         </Typography>
       )}
-    </Paper>
+      </Paper>
+      
+      <Box sx={{ width: 300, height: '100%' }}>
+        <TableOfContents toc={currentToc} />
+      </Box>
+    </Box>
   );
 };
 

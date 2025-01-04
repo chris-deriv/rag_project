@@ -1,8 +1,8 @@
 """Document processing for the RAG application with advanced chunking strategies."""
 import os
 import uuid
-from typing import List, Dict, Optional, BinaryIO, Union, Any
-from dataclasses import dataclass
+from typing import List, Dict, Optional, BinaryIO, Union, Any, Tuple
+from dataclasses import dataclass, asdict
 import re
 from pypdf import PdfReader
 from docx import Document
@@ -14,6 +14,7 @@ import subprocess
 import tempfile
 from .database import VectorDatabase
 from .embedding import EmbeddingGenerator
+from .document_analyzer import document_analyzer
 from config.dynamic_settings import settings_manager
 
 # Configure logging with immediate output
@@ -33,7 +34,10 @@ class ProcessingState:
     source_name: Optional[str] = None
     chunk_count: int = 0
     total_chunks: int = 0
+    classification: Optional[str] = None
+    toc: Optional[List[Dict]] = None
 
+@dataclass
 @dataclass
 class DocumentChunk:
     """Represents a chunk of text from a document with metadata."""
@@ -140,6 +144,12 @@ class DocumentProcessor:
             # Fallback to filename if no title found
             if not title:
                 title = os.path.splitext(os.path.basename(file_path))[0]
+
+            # Extract full text for analysis
+            full_text = "\n".join(page.extract_text() for page in reader.pages)
+            
+            # Analyze document structure and classification
+            analysis = document_analyzer.analyze_document(full_text, title)
             
             for i, page in enumerate(reader.pages):
                 text = page.extract_text()
@@ -152,7 +162,9 @@ class DocumentProcessor:
                             'file_type': 'pdf',
                             'section_type': 'content',
                             'chunk_index': i,
-                            'total_chunks': total_pages
+                            'total_chunks': total_pages,
+                            'classification': analysis['classification'],
+                            'toc': analysis['toc']
                         }
                     })
         except Exception as e:
@@ -224,6 +236,12 @@ class DocumentProcessor:
             # Fallback to filename if no title found
             if not title:
                 title = os.path.splitext(os.path.basename(file_path))[0]
+
+            # Extract full text for analysis
+            full_text = "\n".join(para.text for para in doc.paragraphs)
+            
+            # Analyze document structure and classification
+            analysis = document_analyzer.analyze_document(full_text, title)
             
             # Only include non-empty paragraphs and normalize indices
             non_empty_sections = []
@@ -243,7 +261,9 @@ class DocumentProcessor:
                         'file_type': 'docx',
                         'section_type': 'content',
                         'chunk_index': i,
-                        'total_chunks': total_sections
+                        'total_chunks': total_sections,
+                        'classification': analysis['classification'],
+                        'toc': analysis['toc']
                     }
                 })
         except Exception as e:
@@ -303,6 +323,10 @@ class DocumentStore:
             state.total_chunks = len(chunks)
             # Use original filename (not the converted one) as source name
             state.source_name = filename
+            # Add classification and TOC information
+            if chunks:
+                state.classification = chunks[0].metadata['classification']
+                state.toc = chunks[0].metadata['toc']
             # Update metadata to use original filename
             for chunk in chunks:
                 chunk.metadata['source_name'] = filename

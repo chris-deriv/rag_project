@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Dict, Optional
 import httpx
 from openai import OpenAI
 import copy
@@ -44,7 +44,7 @@ class Chatbot:
         normalized_query = " ".join(query.strip().lower().split())
         return f"{normalized_query}|||{normalized_context}"
 
-    def generate_response(self, context: str, query: str) -> str:
+    def generate_response(self, context: str, query: str) -> Dict[str, any]:
         """
         Generate a response using OpenAI's API based on context and query.
         
@@ -87,9 +87,33 @@ class Chatbot:
             )
 
             response_text = response.choices[0].message.content.strip()
+            
+            # Get TOC from context if available
+            toc = None
+            if isinstance(context, str):
+                # Try to extract TOC from the first chunk's metadata
+                try:
+                    import json
+                    context_lines = context.split('\n')
+                    for line in context_lines:
+                        if '"toc":' in line:
+                            toc_start = line.find('"toc":') + 6
+                            toc_json = line[toc_start:].strip()
+                            if toc_json.endswith(','):
+                                toc_json = toc_json[:-1]
+                            toc = json.loads(toc_json)
+                            break
+                except:
+                    pass
+            
+            result = {
+                'content': response_text,
+                'table_of_contents': toc
+            }
+            
             # Cache the response
-            self._response_cache[cache_key] = response_text
-            return response_text
+            self._response_cache[cache_key] = result
+            return result
 
         except Exception as e:
             raise Exception(f"Error generating response: {str(e)}")
@@ -123,7 +147,7 @@ class Chatbot:
         
         return "\n\n".join(formatted_parts)
 
-    def generate_response_with_sources(self, contexts: List[dict], query: str) -> str:
+    def generate_response_with_sources(self, contexts: List[dict], query: str) -> Dict[str, any]:
         """
         Generate a response with source citations using OpenAI's API.
         
@@ -184,9 +208,22 @@ class Chatbot:
             )
 
             response_text = response.choices[0].message.content.strip()
+            
+            # Get TOC from the first context that has it
+            toc = None
+            for context in contexts:
+                if 'toc' in context:
+                    toc = context['toc']
+                    break
+            
+            result = {
+                'content': response_text,
+                'table_of_contents': toc
+            }
+            
             # Cache the response
-            self._response_cache[cache_key] = response_text
-            return response_text
+            self._response_cache[cache_key] = result
+            return result
 
         except Exception as e:
             raise Exception(f"Error generating response with sources: {str(e)}")

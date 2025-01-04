@@ -1,36 +1,39 @@
-"""Constants for the RAG application.
+"""Constants for the RAG application."""
 
-This module contains truly constant values that never change during runtime.
-These constants are fundamental to the application's operation and should
-only be modified through code changes, not through configuration.
+# Document Classifications
+DOCUMENT_CLASSIFICATIONS = {
+    'policies_procedures': 'Policies and Procedures',
+    'legal_compliance': 'Legal and Compliance',
+    'finance_accounting': 'Finance and Accounting',
+    'human_resources': 'Human Resources',
+    'it_technology': 'IT and Technology',
+    'product_growth': 'Product and Growth',
+    'customer_service_ops': 'Customer Service and Operations',
+    'training_knowledge': 'Training and Knowledge',
+    'risk_management': 'Risk Management',
+    'customer_client': 'Customer and Client Documents',
+    'strategic_planning': 'Strategic Planning',
+    'internal_communication': 'Internal Communication',
+    'project_management': 'Project Management',
+    'cost_procurement': 'Cost Control and Procurement',
+    'data_analytics': 'Data, Analytics and Reports',
+    'security': 'Security',
+    'governance': 'Governance',
+    'miscellaneous': 'Miscellaneous'
+}
 
-Constants are organized into categories:
-
-1. Text Processing:
-   - Separators used for text chunking and processing
-   - These define how documents are split into manageable pieces
-
-2. Model Constants:
-   - Fixed model-related values
-   - These are core to the application's ML functionality
-
-Note: For configurable settings or environment-specific values:
-- Use dynamic_settings.py for runtime-configurable settings
-- Use settings.py for environment-specific configuration
-"""
-
-# Text processing constants
-TEXT_SEPARATORS = [
-    "\n\n",  # Paragraph breaks
-    "\n",    # Line breaks
-    ".",     # Sentence endings
-    "!",     # Exclamations
-    "?",     # Questions
-    ";",     # Semi-colons
-    ":",     # Colons
-    " ",     # Spaces
-    ""       # Empty string fallback
+# Document Structure
+HEADING_PATTERNS = [
+    r'^#{1,6}\s+(.+)$',  # Markdown headings
+    r'^(\d+\.(?:\d+)*)\s+(.+)$',  # Numbered headings (1.1, 1.2, etc.)
+    r'^[A-Z][A-Za-z\s]+:$',  # Title case followed by colon
+    r'^[A-Z][A-Z\s]+(?:\s|$)',  # All caps text
+    r'^(?:Section|Chapter|Part)\s+\d+:?\s*(.+)$',  # Section/Chapter headings
 ]
 
-# Model constants
-DEFAULT_TOKENIZER = "cl100k_base"
+# API Response Keys
+RESPONSE_KEYS = {
+    'TOC_KEY': 'table_of_contents',
+    'CONTENT_KEY': 'content',
+    'METADATA_KEY': 'metadata'
+}
