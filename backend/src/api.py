@@ -139,12 +139,23 @@ def chat():
         # Log the filters being applied
         logger.info(f"Query filters - source_names: {source_names}, title: {title}")
         
-        response = rag_app.query_documents(
+        response_text = rag_app.query_documents(
             data['query'],
             source_names=source_names,  # Pass the array directly
             title=title
         )
-        return jsonify({'response': response})
+
+        # Get TOC from the first selected document
+        toc = None
+        if source_names:
+            doc_info = document_store.get_document_info(source_names[0])
+            if doc_info and 'toc' in doc_info:
+                toc = doc_info['toc']
+
+        return jsonify({
+            'response': response_text,
+            'table_of_contents': toc
+        })
     except Exception as e:
         logger.error(f"Error in chat endpoint: {str(e)}")
         return jsonify({'error': str(e)}), 500
