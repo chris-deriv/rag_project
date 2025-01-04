@@ -94,6 +94,7 @@ class VectorDatabase:
                 logger.info(f"Title: {doc.get('title', '')}")
                 logger.info(f"Chunk Index: {doc.get('chunk_index', 0)}")
                 logger.info(f"Total Chunks: {doc.get('total_chunks', 1)}")
+                logger.info(f"Has TOC: {bool(doc.get('toc'))}")
             
             # Validate chunk consistency before proceeding
             self._validate_chunk_consistency(documents)
@@ -143,7 +144,8 @@ class VectorDatabase:
                         "section_title": doc.get("section_title", ""),
                         "section_type": doc.get("section_type", "content"),
                         "file_type": doc.get("file_type", ""),
-                        "text": doc["text"]  # Include text in metadata for easier retrieval
+                        "text": doc["text"],  # Include text in metadata for easier retrieval
+                        "toc": doc.get("toc")  # Include table of contents
                     } for doc in source_docs],
                     ids=[str(doc["id"]) for doc in source_docs]
                 )
@@ -156,6 +158,7 @@ class VectorDatabase:
             logger.info("\nAll documents in collection after adding:")
             for metadata in all_docs['metadatas']:
                 logger.info(f"Source Name: {metadata.get('source_name')}")
+                logger.info(f"Has TOC: {bool(metadata.get('toc'))}")
             
         except Exception as e:
             logger.error(f"Error adding documents to vector database: {str(e)}")
@@ -236,7 +239,8 @@ class VectorDatabase:
                         'title': metadata.get('title', ''),
                         'source_name': source_name,
                         'file_type': metadata.get('file_type', ''),
-                        'section_type': metadata.get('section_type', 'content')
+                        'section_type': metadata.get('section_type', 'content'),
+                        'toc': metadata.get('toc')  # Include TOC in search results
                     })
             
             return matches
@@ -314,6 +318,7 @@ class VectorDatabase:
                 logger.info(f"Title: {all_docs['metadatas'][i].get('title', '')}")
                 logger.info(f"Chunk Index: {all_docs['metadatas'][i].get('chunk_index', 0)}")
                 logger.info(f"Total Chunks: {all_docs['metadatas'][i].get('total_chunks', 1)}")
+                logger.info(f"Has TOC: {bool(all_docs['metadatas'][i].get('toc'))}")
             
             doc_stats = {}
             
@@ -325,7 +330,8 @@ class VectorDatabase:
                         'source_name': source_name,
                         'title': metadata.get('title', ''),
                         'chunk_count': 1,
-                        'total_chunks': metadata.get('total_chunks', 1)
+                        'total_chunks': metadata.get('total_chunks', 1),
+                        'toc': metadata.get('toc')  # Include TOC in document stats
                     }
                 else:
                     doc_stats[source_name]['chunk_count'] += 1
@@ -336,6 +342,7 @@ class VectorDatabase:
                 logger.info(f"\nSource: {doc['source_name']}")
                 logger.info(f"Title: {doc['title']}")
                 logger.info(f"Chunks: {doc['chunk_count']}/{doc['total_chunks']}")
+                logger.info(f"Has TOC: {bool(doc.get('toc'))}")
             
             return list(doc_stats.values())
         except Exception as e:
