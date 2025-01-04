@@ -167,7 +167,8 @@ class RAGApplication:
                     "source": result['metadata'].get('source_name', 'Unknown'),
                     "title": result['metadata'].get('title', ''),
                     "chunk_index": result['metadata'].get('chunk_index', 0),
-                    "total_chunks": result['metadata'].get('total_chunks', 1)
+                    "total_chunks": result['metadata'].get('total_chunks', 1),
+                    "toc": result['metadata'].get('toc')  # Include TOC from metadata
                 }
                 contexts.append(context)
             

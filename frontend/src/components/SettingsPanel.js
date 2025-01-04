@@ -87,7 +87,12 @@ const SettingsPanel = ({ onClose }) => {
                     <TextField
                         label="Temperature"
                         type="number"
-                        inputProps={{ step: 0.1, min: 0, max: 2 }}
+                        inputProps={{ 
+                            step: 0.1, 
+                            min: 0, 
+                            max: 2,
+                            'data-lpignore': 'true'
+                        }}
                         value={settings.llm.temperature}
                         onChange={(e) => handleChange('llm', 'temperature', parseFloat(e.target.value))}
                         helperText="Controls randomness in responses (0-2)"
@@ -96,7 +101,10 @@ const SettingsPanel = ({ onClose }) => {
                     <TextField
                         label="Max Tokens"
                         type="number"
-                        inputProps={{ min: 1 }}
+                        inputProps={{ 
+                            min: 1,
+                            'data-lpignore': 'true'
+                        }}
                         value={settings.llm.max_tokens}
                         onChange={(e) => handleChange('llm', 'max_tokens', parseInt(e.target.value))}
                         helperText="Maximum length of generated responses"
@@ -123,7 +131,10 @@ const SettingsPanel = ({ onClose }) => {
                     <TextField
                         label="Chunk Size"
                         type="number"
-                        inputProps={{ min: 100 }}
+                        inputProps={{ 
+                            min: 100,
+                            'data-lpignore': 'true'
+                        }}
                         value={settings.document_processing.chunk_size}
                         onChange={(e) => handleChange('document_processing', 'chunk_size', parseInt(e.target.value))}
                         helperText="Size of text chunks for processing"
@@ -132,7 +143,10 @@ const SettingsPanel = ({ onClose }) => {
                     <TextField
                         label="Chunk Overlap"
                         type="number"
-                        inputProps={{ min: 0 }}
+                        inputProps={{ 
+                            min: 0,
+                            'data-lpignore': 'true'
+                        }}
                         value={settings.document_processing.chunk_overlap}
                         onChange={(e) => handleChange('document_processing', 'chunk_overlap', parseInt(e.target.value))}
                         helperText="Overlap between consecutive chunks"
@@ -149,6 +163,7 @@ const SettingsPanel = ({ onClose }) => {
                         label="System Prompt"
                         multiline
                         rows={4}
+                        inputProps={{ 'data-lpignore': 'true' }}
                         value={settings.response.system_prompt}
                         onChange={(e) => handleChange('response', 'system_prompt', e.target.value)}
                         helperText="Base prompt for response generation"
@@ -158,6 +173,7 @@ const SettingsPanel = ({ onClose }) => {
                         label="Source Citation Prompt"
                         multiline
                         rows={4}
+                        inputProps={{ 'data-lpignore': 'true' }}
                         value={settings.response.source_citation_prompt}
                         onChange={(e) => handleChange('response', 'source_citation_prompt', e.target.value)}
                         helperText="Prompt for responses with source citations"

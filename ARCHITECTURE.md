@@ -11,7 +11,8 @@ The system implements a sophisticated RAG (Retrieval Augmented Generation) pipel
   * Configurable chunk size (500) and overlap (50)
   * Document structure and metadata preservation
   * Title and section extraction
-- Output: Structured document chunks with metadata
+  * Table of contents generation
+- Output: Structured document chunks with metadata and TOC
 
 2. **Embedding Generation**
 - Model: sentence-transformers (all-MiniLM-L6-v2)
@@ -24,7 +25,7 @@ The system implements a sophisticated RAG (Retrieval Augmented Generation) pipel
 3. **Vector Storage (ChromaDB)**
 - Storage:
   * HNSW index for efficient similarity search
-  * Rich metadata storage
+  * Rich metadata storage including TOC
   * Atomic operations
 - Features:
   * Source-based filtering
@@ -52,9 +53,9 @@ The system implements a sophisticated RAG (Retrieval Augmented Generation) pipel
 
 5. **Data Flow**
 ```
-Document → Chunks → Embeddings → Vector DB
-                                    ↓
-Query → Embedding → Vector Search → Rerank → Response
+Document → Document Analyzer → TOC Generation → Chunks → Embeddings → Vector DB
+                                                                        ↓
+Query → Embedding → Vector Search → Rerank → Response with TOC
 ```
 
 6. **Key Optimizations**
@@ -96,16 +97,20 @@ class ProcessingState:
     source_name: str     # Document identifier
     chunk_count: int     # Current chunks processed
     total_chunks: int    # Expected total chunks
+    classification: str  # Document classification
+    toc: List[Dict]     # Table of contents
 ```
 - Real-time processing status
 - Error tracking
 - Progress monitoring
 - Atomic state updates
+- TOC preservation
 
 3. **Document Processing Pipeline**
 ```
-Upload -> Process -> Generate Embeddings -> Store -> Verify -> Index
+Upload → Document Analyzer → TOC Generation → Process → Generate Embeddings → Store → Verify → Index
 ```
+- Document analysis and TOC extraction
 - Chunking with metadata preservation
 - Single embedding generation point
 - Atomic database operations
@@ -115,14 +120,20 @@ Upload -> Process -> Generate Embeddings -> Store -> Verify -> Index
 4. **Processing Flow**
 ```python
 try:
-    # 1. Process document into chunks
-    chunks = processor.process_document(file_path)
+    # 1. Analyze document and generate TOC
+    analysis = analyzer.analyze_document(text, title)
+    toc = analysis['toc']
     
-    # 2. Generate embeddings (single point)
+    # 2. Process document into chunks with TOC
+    chunks = processor.process_document(file_path)
+    for chunk in chunks:
+        chunk.metadata['toc'] = toc
+    
+    # 3. Generate embeddings (single point)
     texts = [chunk.text for chunk in chunks]
     embeddings = embedding_generator.generate_embeddings(texts)
     
-    # 3. Prepare documents with embeddings
+    # 4. Prepare documents with embeddings and TOC
     documents = [
         {
             "id": chunk.id,
@@ -133,10 +144,10 @@ try:
         for chunk, embedding in zip(chunks, embeddings)
     ]
     
-    # 4. Atomic database operation
+    # 5. Atomic database operation
     vector_db.add_documents(documents)
     
-    # 5. Verify storage
+    # 6. Verify storage
     stored_chunks = vector_db.get_document_chunks(source_name)
     if not stored_chunks:
         raise ValueError("Storage verification failed")
@@ -147,7 +158,6 @@ try:
 - Atomic rollbacks
 - Clean temporary file handling
 - Detailed error logging
-
 
 ## Search and Retrieval Architecture
 
@@ -185,7 +195,8 @@ def search_titles(self, title_query: str) -> List[Dict[str, Any]]:
   ```python
   {
       'title': str,        # Original document title
-      'source_name': str   # Document filename
+      'source_name': str,  # Document filename
+      'toc': List[Dict]    # Table of contents
   }
   ```
 
@@ -258,7 +269,7 @@ def rerank_results(self, query: str, search_results: Dict[str, Any]) -> List[Dic
 {
     'id': str,                # Document chunk ID
     'text': str,              # Chunk content
-    'metadata': Dict,         # Full chunk metadata
+    'metadata': Dict,         # Full chunk metadata including TOC
     'similarity_score': float, # Vector similarity
     'relevance_score': float, # LLM relevance
     'combined_score': float   # Final ranking score
@@ -282,7 +293,7 @@ def parse_query(self, query: str) -> Dict[str, Any]:
 
 2. **Response Generation**
 ```python
-def generate_response(self, context: str, query: str) -> str:
+def generate_response(self, context: str, query: str) -> Dict[str, Any]:
 ```
 - Comprehensive response generation:
   - Detailed explanations with examples and analogies
@@ -297,10 +308,17 @@ def generate_response(self, context: str, query: str) -> str:
   - Deterministic cache keys
   - Normalized query and context matching
   - Efficient cache retrieval
+- Response structure:
+  ```python
+  {
+      'content': str,           # Generated response text
+      'table_of_contents': List # Document's TOC if available
+  }
+  ```
 
 3. **Source-Cited Responses**
 ```python
-def generate_response_with_sources(self, contexts: List[dict], query: str) -> str:
+def generate_response_with_sources(self, contexts: List[dict], query: str) -> Dict[str, Any]:
 ```
 - Enhanced source integration:
   - Clear source citations using [Source X] notation
@@ -315,11 +333,21 @@ def generate_response_with_sources(self, contexts: List[dict], query: str) -> st
   - Deterministic context formatting
   - Consistent source ordering
   - Efficient cache lookup
+- Response structure:
+  ```python
+  {
+      'content': str,           # Generated response text with citations
+      'table_of_contents': List # TOC from first source document
+  }
+  ```
 
 4. **Result Structure**
 ```python
 {
-    'response': str,           # Generated response text
+    'response': {
+        'content': str,           # Generated response text
+        'table_of_contents': List # Document's TOC if available
+    },
     'sources': List[Dict],     # Source citations and metadata
     'cached': bool,            # Cache hit indicator
     'generation_time': float   # Response generation duration
@@ -348,7 +376,9 @@ The system exposes several REST endpoints:
       "error": Optional[str],   # Error message if failed
       "source_name": str,       # Document identifier
       "chunk_count": int,       # Current chunks processed
-      "total_chunks": int       # Expected total chunks
+      "total_chunks": int,      # Expected total chunks
+      "classification": str,    # Document classification
+      "toc": List[Dict]        # Table of contents
   }
   ```
 
@@ -363,7 +393,9 @@ The system exposes several REST endpoints:
           "chunk_count": int,     # Number of chunks
           "total_chunks": int,    # Total expected chunks
           "status": str,          # Processing status
-          "error": Optional[str]  # Error message if failed
+          "error": Optional[str], # Error message if failed
+          "classification": str,  # Document classification
+          "toc": List[Dict]      # Table of contents
       }
   ]
   ```
@@ -379,7 +411,8 @@ The system exposes several REST endpoints:
           "chunk_index": int,    # Position in document
           "total_chunks": int,   # Total chunks in document
           "section_title": str,  # Section heading
-          "section_type": str    # Content type
+          "section_type": str,   # Content type
+          "toc": List[Dict]     # Table of contents
       }
   ]
   ```
@@ -391,7 +424,8 @@ The system exposes several REST endpoints:
   [
       {
           "title": str,          # Document title
-          "source_name": str     # Document filename
+          "source_name": str,    # Document filename
+          "toc": List[Dict]     # Table of contents
       }
   ]
   ```
@@ -405,8 +439,16 @@ The system exposes several REST endpoints:
       "title": str,              # Optional title filter
       "source_name": str         # Optional filename filter
   }
+  
+  # Response format:
+  {
+      "response": {
+          "content": str,        # Generated response
+          "table_of_contents": List[Dict]  # TOC from document
+      }
+  }
   ```
-- Returns AI-generated responses with source citations
+- Returns AI-generated responses with source citations and TOC
 
 ## Dependencies
 

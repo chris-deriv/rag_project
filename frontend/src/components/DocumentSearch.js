@@ -19,12 +19,34 @@ import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import ClearIcon from '@mui/icons-material/Clear';
 import api from '../api';
 
+// Create a custom ResizeObserver that ignores errors
+const safeResizeObserver = (callback) => {
+  try {
+    return new ResizeObserver((entries) => {
+      // Wrap in requestAnimationFrame to prevent loop limit exceeded error
+      window.requestAnimationFrame(() => {
+        if (entries && entries.length) {
+          callback(entries);
+        }
+      });
+    });
+  } catch (e) {
+    console.warn('ResizeObserver error:', e);
+    return {
+      observe: () => {},
+      unobserve: () => {},
+      disconnect: () => {}
+    };
+  }
+};
+
 const DocumentSearch = ({ onDocumentsSelect, selectedDocuments, refreshTrigger = 0 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [documents, setDocuments] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const cachedDocs = useRef([]);
+  const listRef = useRef(null);
 
   // Load documents and poll for updates
   useEffect(() => {
@@ -124,6 +146,21 @@ const DocumentSearch = ({ onDocumentsSelect, selectedDocuments, refreshTrigger =
     };
   }, [searchQuery]);
 
+  // Setup ResizeObserver for the list
+  useEffect(() => {
+    if (listRef.current) {
+      const observer = safeResizeObserver(() => {
+        // Handle resize if needed
+      });
+      
+      observer.observe(listRef.current);
+      
+      return () => {
+        observer.disconnect();
+      };
+    }
+  }, []);
+
   // Handle document selection
   const handleDocumentToggle = useCallback((doc) => {
     // Only allow selection of completed documents
@@ -153,7 +190,7 @@ const DocumentSearch = ({ onDocumentsSelect, selectedDocuments, refreshTrigger =
         return (
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <CircularProgress size={16} />
-            <Typography variant="caption" color="primary">
+            <Typography variant="caption" color="primary" component="span">
               Processing...
             </Typography>
           </Box>
@@ -183,6 +220,7 @@ const DocumentSearch = ({ onDocumentsSelect, selectedDocuments, refreshTrigger =
         {doc.status === 'completed' && (
           <Typography 
             variant="caption" 
+            component="span"
             sx={{ 
               color: 'text.secondary',
               fontSize: '0.75rem'
@@ -202,7 +240,7 @@ const DocumentSearch = ({ onDocumentsSelect, selectedDocuments, refreshTrigger =
       flexGrow: 1,
       minHeight: 0  // Important for nested flex containers
     }}>
-      <Typography variant="h6" gutterBottom>
+      <Typography variant="h6" component="h2" gutterBottom>
         Documents
       </Typography>
 
@@ -214,6 +252,9 @@ const DocumentSearch = ({ onDocumentsSelect, selectedDocuments, refreshTrigger =
         value={searchQuery}
         onChange={(e) => setSearchQuery(e.target.value)}
         sx={{ mb: 2 }}
+        inputProps={{
+          'data-lpignore': 'true'
+        }}
         InputProps={{
           endAdornment: searchQuery ? (
             <InputAdornment position="end">
@@ -258,10 +299,12 @@ const DocumentSearch = ({ onDocumentsSelect, selectedDocuments, refreshTrigger =
           borderRadius: 1,
           bgcolor: 'background.paper',
           display: 'flex',  // Add flex display
-          height: 0  // Force container to respect flex sizing
+          height: 0,  // Force container to respect flex sizing
+          position: 'relative' // Add position relative for ResizeObserver
         }}
       >
         <List 
+          ref={listRef}
           sx={{ 
             flexGrow: 1,
             overflow: 'auto',
@@ -288,7 +331,7 @@ const DocumentSearch = ({ onDocumentsSelect, selectedDocuments, refreshTrigger =
               alignItems: 'center', 
               justifyContent: 'center' 
             }}>
-              <Typography color="text.secondary">
+              <Typography color="text.secondary" component="span">
                 No documents found
               </Typography>
             </Box>
@@ -321,11 +364,13 @@ const DocumentSearch = ({ onDocumentsSelect, selectedDocuments, refreshTrigger =
                 <Tooltip title={doc.source_name} placement="top">
                   <Typography
                     variant="body2"
+                    component="span"
                     sx={{
                       whiteSpace: 'nowrap',
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
-                      fontSize: '0.875rem'
+                      fontSize: '0.875rem',
+                      display: 'block'
                     }}
                   >
                     {doc.source_name}
@@ -334,6 +379,7 @@ const DocumentSearch = ({ onDocumentsSelect, selectedDocuments, refreshTrigger =
               }
               secondary={getSecondaryContent(doc)}
               secondaryTypographyProps={{
+                component: 'div',
                 sx: { 
                   mt: 0.25,  // Reduce space between primary and secondary text
                   display: 'block'  // Ensure secondary text is on new line

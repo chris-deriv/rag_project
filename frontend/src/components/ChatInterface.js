@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import TableOfContents from './TableOfContents';
 import {
   TextField,
@@ -13,7 +13,8 @@ import {
   IconButton,
   Tooltip,
   Tabs,
-  Tab
+  Tab,
+  useTheme
 } from '@mui/material';
 import SendIcon from '@mui/icons-material/Send';
 import DownloadIcon from '@mui/icons-material/Download';
@@ -21,6 +22,27 @@ import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import 'katex/dist/katex.min.css';
 import { InlineMath, BlockMath } from 'react-katex';
 import api from '../api';
+
+// Create a custom ResizeObserver that ignores errors
+const safeResizeObserver = (callback) => {
+  try {
+    return new ResizeObserver((entries) => {
+      // Wrap in requestAnimationFrame to prevent loop limit exceeded error
+      window.requestAnimationFrame(() => {
+        if (entries && entries.length) {
+          callback(entries);
+        }
+      });
+    });
+  } catch (e) {
+    console.warn('ResizeObserver error:', e);
+    return {
+      observe: () => {},
+      unobserve: () => {},
+      disconnect: () => {}
+    };
+  }
+};
 
 const ChatInterface = ({ selectedDocuments, onDocumentDelete }) => {
   const [query, setQuery] = useState('');
@@ -30,16 +52,29 @@ const ChatInterface = ({ selectedDocuments, onDocumentDelete }) => {
   const [viewMode, setViewMode] = useState('markdown'); // 'markdown' or 'latex'
   const [currentToc, setCurrentToc] = useState(null);
   const messagesEndRef = useRef(null);
+  const theme = useTheme();
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  };
+  const scrollToBottom = useCallback(() => {
+    if (messagesEndRef.current) {
+      const observer = safeResizeObserver(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      });
+      
+      observer.observe(messagesEndRef.current);
+      
+      // Cleanup
+      return () => {
+        observer.disconnect();
+      };
+    }
+  }, []);
 
   useEffect(() => {
-    scrollToBottom();
-  }, [messages, viewMode]);
+    const cleanup = scrollToBottom();
+    return () => cleanup && cleanup();
+  }, [messages, viewMode, scrollToBottom]);
 
-  const handleSubmit = async (e) => {
+  const handleSubmit = useCallback(async (e) => {
     e.preventDefault();
     if (!query.trim()) return;
 
@@ -53,9 +88,14 @@ const ChatInterface = ({ selectedDocuments, onDocumentDelete }) => {
         selectedDocuments.map(doc => doc.source_name),
         null
       );
+      // Ensure consistent content structure
+      const messageContent = typeof result.content === 'object' 
+        ? result.content.content 
+        : result.content;
+
       setMessages(prev => [...prev, { 
         type: 'assistant', 
-        content: result.content,
+        content: messageContent,
         toc: result.table_of_contents
       }]);
       
@@ -64,18 +104,57 @@ const ChatInterface = ({ selectedDocuments, onDocumentDelete }) => {
         setCurrentToc(result.table_of_contents);
       }
     } catch (err) {
+      // Extract error details
       const errorMessage = err.response?.data?.error || 'Error getting response';
-      setError(errorMessage);
+      const errorDetails = err.response?.data?.details || err.message;
+      const errorCode = err.response?.status;
+
+      // Create user-friendly error message
+      const userMessage = errorCode 
+        ? `Error (${errorCode}): ${errorMessage}`
+        : errorMessage;
+
+      // Log error for debugging
+      console.error('Chat error:', {
+        message: errorMessage,
+        details: errorDetails,
+        code: errorCode,
+        error: err
+      });
+
+      setError(userMessage);
       setMessages(prev => [...prev, { 
         type: 'error', 
-        content: errorMessage,
-        details: err.response?.data?.details
+        content: userMessage,
+        details: errorDetails
       }]);
+
+      // Clear error after 5 seconds
+      setTimeout(() => setError(null), 5000);
     } finally {
       setLoading(false);
       setQuery('');
     }
-  };
+  }, [query, selectedDocuments]);
+
+  // Add keyboard shortcut handler
+  useEffect(() => {
+    const handleKeyPress = (e) => {
+      // Ctrl/Cmd + Enter to submit
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        if (!loading && query.trim() && selectedDocuments.length > 0) {
+          handleSubmit(e);
+        }
+      }
+      // Esc to clear input
+      if (e.key === 'Escape') {
+        setQuery('');
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyPress);
+    return () => window.removeEventListener('keydown', handleKeyPress);
+  }, [loading, query, selectedDocuments.length, handleSubmit]);
 
   const escapeLatex = (text) => {
     if (!text) return '';  // Return empty string for undefined/null input
@@ -126,7 +205,7 @@ const ChatInterface = ({ selectedDocuments, onDocumentDelete }) => {
     if (!content) return null;  // Return null for undefined/null input
     
     // Split content by math delimiters
-    const parts = content.split(/(\$\$[\s\S]*?\$\$|\$[^\$]*\$)/g);
+    const parts = content.split(/(\$\$[\s\S]*?\$\$|\$[^$]*\$)/g);
     
     return parts.map((part, index) => {
       if (part.startsWith('$$') && part.endsWith('$$')) {
@@ -377,10 +456,15 @@ ${markdownToLatex(message.content)}
   };
 
   const renderMessage = (message) => {
+    // Handle case where message.content is an object with content property
+    const content = typeof message.content === 'object' && message.content.content 
+      ? message.content.content 
+      : message.content;
+
     if (viewMode === 'latex' && message.type === 'assistant') {
-      return renderLatexMessage(message.content);
+      return renderLatexMessage(content);
     }
-    return message.content;
+    return content;
   };
 
   return (
@@ -555,18 +639,33 @@ ${markdownToLatex(message.content)}
             fullWidth
             placeholder={selectedDocuments.length === 0 
               ? "Select documents to start chatting..." 
-              : "Type your message..."}
+              : "Type your message... (Ctrl+Enter to send, Esc to clear)"}
             variant="outlined"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             disabled={loading || selectedDocuments.length === 0}
             size="small"
+            multiline
+            maxRows={4}
+            aria-label="Chat input"
+            aria-describedby="chat-input-help"
+            inputProps={{
+              'data-lpignore': 'true'
+            }}
+            InputProps={{
+              'aria-controls': 'chat-messages',
+              'aria-expanded': 'true',
+              role: 'textbox',
+              'aria-multiline': 'true'
+            }}
           />
           <Button
             type="submit"
             variant="contained"
             endIcon={loading ? <CircularProgress size={20} color="inherit" /> : <SendIcon />}
             disabled={loading || !query.trim() || selectedDocuments.length === 0}
+            aria-label={loading ? "Sending message..." : "Send message"}
+            title="Send message (Ctrl+Enter)"
           >
             Send
           </Button>

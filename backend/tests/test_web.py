@@ -321,13 +321,14 @@ def test_search_titles_error_handling(client, mock_vector_db):
     assert 'error' in data
     assert 'Database error' in data['error']
 
-def test_chat_with_title_filter(client, mock_rag_app, mock_document_store):
+def test_chat_with_title_filter(client, mock_rag_app):
     """Test chat endpoint with title filter."""
-    # Mock response
-    mock_rag_app.query_documents.return_value = "Response about Python"
-    
-    # Mock document info with TOC
-    mock_document_store.get_document_info.return_value = None  # No document info since no source_names
+    # Mock response with TOC
+    mock_response = {
+        'content': 'Response about Python',
+        'table_of_contents': None  # No TOC when using only title filter
+    }
+    mock_rag_app.query_documents.return_value = mock_response
 
     # Make request with title filter
     response = client.post('/chat', json={
@@ -338,9 +339,7 @@ def test_chat_with_title_filter(client, mock_rag_app, mock_document_store):
     # Verify response
     assert response.status_code == 200
     data = json.loads(response.data)
-    assert data['response'] == 'Response about Python'
-    assert 'table_of_contents' in data
-    assert data['table_of_contents'] is None  # No TOC when only using title filter
+    assert data['response'] == mock_response
 
     # Verify query was called with title filter
     mock_rag_app.query_documents.assert_called_once_with(
@@ -349,20 +348,14 @@ def test_chat_with_title_filter(client, mock_rag_app, mock_document_store):
         title='python'
     )
 
-    # Verify document info was not fetched since no source_names
-    mock_document_store.get_document_info.assert_not_called()
-
-def test_chat_with_source_names_filter(client, mock_rag_app, mock_document_store):
+def test_chat_with_source_names_filter(client, mock_rag_app):
     """Test chat endpoint with source names filter."""
-    # Mock response
-    mock_rag_app.query_documents.return_value = "Response from test.pdf"
-    
-    # Mock document info with TOC
-    mock_document_store.get_document_info.return_value = {
-        'source_name': 'test1.pdf',
-        'title': 'Test Document',
-        'toc': [{'text': 'Test Document', 'level': 1, 'children': []}]
+    # Mock response with TOC
+    mock_response = {
+        'content': 'Response from test.pdf',
+        'table_of_contents': [{'text': 'Test Document', 'level': 1, 'children': []}]
     }
+    mock_rag_app.query_documents.return_value = mock_response
 
     # Make request with source names filter
     source_names = ['test1.pdf', 'test2.pdf']
@@ -374,9 +367,7 @@ def test_chat_with_source_names_filter(client, mock_rag_app, mock_document_store
     # Verify response
     assert response.status_code == 200
     data = json.loads(response.data)
-    assert data['response'] == 'Response from test.pdf'
-    assert 'table_of_contents' in data
-    assert data['table_of_contents'] == [{'text': 'Test Document', 'level': 1, 'children': []}]
+    assert data['response'] == mock_response
 
     # Verify query was called with source names filter
     mock_rag_app.query_documents.assert_called_once_with(
@@ -385,20 +376,14 @@ def test_chat_with_source_names_filter(client, mock_rag_app, mock_document_store
         title=None
     )
 
-    # Verify document info was fetched
-    mock_document_store.get_document_info.assert_called_once_with('test1.pdf')
-
-def test_chat_with_both_filters(client, mock_rag_app, mock_document_store):
+def test_chat_with_both_filters(client, mock_rag_app):
     """Test chat endpoint with both title and source names filters."""
-    # Mock response
-    mock_rag_app.query_documents.return_value = "Filtered response"
-    
-    # Mock document info with TOC
-    mock_document_store.get_document_info.return_value = {
-        'source_name': 'test1.pdf',
-        'title': 'Test Document',
-        'toc': [{'text': 'Test Document', 'level': 1, 'children': []}]
+    # Mock response with TOC
+    mock_response = {
+        'content': 'Filtered response',
+        'table_of_contents': [{'text': 'Test Document', 'level': 1, 'children': []}]
     }
+    mock_rag_app.query_documents.return_value = mock_response
 
     # Make request with both filters
     source_names = ['test1.pdf', 'test2.pdf']
@@ -411,9 +396,7 @@ def test_chat_with_both_filters(client, mock_rag_app, mock_document_store):
     # Verify response
     assert response.status_code == 200
     data = json.loads(response.data)
-    assert data['response'] == 'Filtered response'
-    assert 'table_of_contents' in data
-    assert data['table_of_contents'] == [{'text': 'Test Document', 'level': 1, 'children': []}]
+    assert data['response'] == mock_response
 
     # Verify query was called with both filters
     mock_rag_app.query_documents.assert_called_once_with(
@@ -421,9 +404,6 @@ def test_chat_with_both_filters(client, mock_rag_app, mock_document_store):
         source_names=source_names,
         title='python'
     )
-
-    # Verify document info was fetched
-    mock_document_store.get_document_info.assert_called_once_with('test1.pdf')
 
 def test_chat_no_query(client):
     """Test chat endpoint with missing query."""

@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useState, useCallback } from 'react';
+import PropTypes from 'prop-types';
 import {
   Box,
   Typography,
@@ -6,38 +7,85 @@ import {
   ListItem,
   ListItemText,
   Collapse,
-  Paper
+  Paper,
+  useTheme
 } from '@mui/material';
 import ExpandLess from '@mui/icons-material/ExpandLess';
 import ExpandMore from '@mui/icons-material/ExpandMore';
 
-const TableOfContents = ({ toc }) => {
-  const [expanded, setExpanded] = React.useState({});
+// Create a custom ResizeObserver that ignores errors
+const safeResizeObserver = (callback) => {
+  try {
+    return new ResizeObserver((entries) => {
+      // Wrap in requestAnimationFrame to prevent loop limit exceeded error
+      window.requestAnimationFrame(() => {
+        if (entries && entries.length) {
+          callback(entries);
+        }
+      });
+    });
+  } catch (e) {
+    console.warn('ResizeObserver error:', e);
+    return {
+      observe: () => {},
+      unobserve: () => {},
+      disconnect: () => {}
+    };
+  }
+};
 
-  const toggleExpand = (index) => {
+const TableOfContents = ({ toc = [] }) => {
+  const theme = useTheme();
+  const [expanded, setExpanded] = useState({});
+
+  // Memoize expanded state handler
+  const toggleExpand = useCallback((index) => {
     setExpanded(prev => ({
       ...prev,
       [index]: !prev[index]
     }));
-  };
+  }, []);
 
-  const renderTocItem = (item, index, level = 0) => {
+  // Handle keyboard navigation
+  const handleKeyDown = useCallback((e, index, hasChildren) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      if (hasChildren) {
+        toggleExpand(index);
+      }
+    }
+  }, [toggleExpand]);
+
+  // Memoize rendering function
+  const renderTocItem = useCallback((item, index, level = 0) => {
     const hasChildren = item.children && item.children.length > 0;
     const isExpanded = expanded[index] ?? true;
+    const itemId = `toc-item-${index}`;
 
     return (
       <React.Fragment key={`${index}-${item.text}`}>
         <ListItem
           button={hasChildren}
           onClick={hasChildren ? () => toggleExpand(index) : undefined}
+          onKeyDown={(e) => handleKeyDown(e, index, hasChildren)}
           sx={{
             pl: level * 2,
             py: 0.5,
             minHeight: 36,
             '&:hover': {
               bgcolor: 'action.hover'
+            },
+            '&:focus-visible': {
+              outline: `2px solid ${theme.palette.primary.main}`,
+              outlineOffset: '-2px'
             }
           }}
+          role="treeitem"
+          aria-expanded={hasChildren ? isExpanded : undefined}
+          aria-level={level + 1}
+          aria-owns={hasChildren ? `${itemId}-group` : undefined}
+          id={itemId}
+          tabIndex={0}
         >
           <ListItemText
             primary={item.text}
@@ -46,18 +94,28 @@ const TableOfContents = ({ toc }) => {
               sx: {
                 fontWeight: level === 0 ? 600 : 400,
                 color: level === 0 ? 'primary.main' : 'text.primary'
-              }}
-            }
+              }
+            }}
           />
           {hasChildren && (
-            <Box component="span" sx={{ ml: 1 }}>
+            <Box 
+              component="span" 
+              sx={{ ml: 1 }}
+              aria-hidden="true"
+            >
               {isExpanded ? <ExpandLess /> : <ExpandMore />}
             </Box>
           )}
         </ListItem>
         {hasChildren && (
           <Collapse in={isExpanded} timeout="auto">
-            <List component="div" disablePadding>
+            <List 
+              component="div" 
+              disablePadding
+              role="group"
+              id={`${itemId}-group`}
+              aria-labelledby={itemId}
+            >
               {item.children.map((child, childIndex) =>
                 renderTocItem(child, `${index}-${childIndex}`, level + 1)
               )}
@@ -66,7 +124,7 @@ const TableOfContents = ({ toc }) => {
         )}
       </React.Fragment>
     );
-  };
+  }, [expanded, handleKeyDown, theme.palette.primary.main, toggleExpand]);
 
   if (!toc || toc.length === 0) {
     return (
@@ -92,7 +150,8 @@ const TableOfContents = ({ toc }) => {
       sx={{
         height: '100%',
         overflow: 'auto',
-        bgcolor: 'background.paper'
+        bgcolor: 'background.paper',
+        position: 'relative' // Add position relative for ResizeObserver
       }}
     >
       <Box sx={{ p: 2, borderBottom: 1, borderColor: 'divider' }}>
@@ -112,6 +171,15 @@ const TableOfContents = ({ toc }) => {
       </List>
     </Paper>
   );
+};
+
+TableOfContents.propTypes = {
+  toc: PropTypes.arrayOf(
+    PropTypes.shape({
+      text: PropTypes.string.isRequired,
+      children: PropTypes.arrayOf(PropTypes.object)
+    })
+  )
 };
 
 export default TableOfContents;
