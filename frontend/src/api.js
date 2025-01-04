@@ -48,7 +48,11 @@ const api = {
       source_names,
       title
     });
-    return response.data;
+    // Return the response data which includes both the response text and table_of_contents
+    return {
+      content: response.data.response,
+      table_of_contents: response.data.table_of_contents
+    };
   },
 
   // Reset database
