@@ -146,7 +146,7 @@ The annual review process includes..."""
         assert len(result['toc'][0]['children']) == 2  # Two main sections
         
         assert 'headings' in result
-        assert len(result['headings']) == 7  # Total number of headings
+        assert len(result['headings']) == 6  # Total number of headings
         assert all(isinstance(h['text'], str) for h in result['headings'])
         assert all(isinstance(h['level'], int) for h in result['headings'])
 

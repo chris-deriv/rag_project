@@ -36,49 +36,59 @@ class DocumentAnalyzer:
         current_pos = 0
         
         for line in lines:
+            original_line = line
             line = line.strip()
             if not line:
-                current_pos += len(line) + 1
+                current_pos += len(original_line) + 1
+                continue
+                
+            # Check for numbered headings first (e.g., "1.", "1.1.", "1.1.1.")
+            number_match = re.match(r'^(\d+\.)+\s*(.+)$', line)
+            if number_match:
+                # Count dots to determine level
+                level = line[:number_match.start(2)].count('.')
+                heading_text = number_match.group(2).strip()
+                heading = Heading(
+                    text=heading_text,
+                    level=level,
+                    start_pos=current_pos,
+                    end_pos=current_pos + len(original_line)
+                )
+                headings.append(heading)
+                current_pos += len(original_line) + 1
                 continue
                 
             # Check each heading pattern
             for pattern in self.heading_patterns:
                 match = pattern.match(line)
                 if match:
-                    # Determine heading level
+                    # Determine heading level and text
                     if line.startswith('#'):
                         level = len(line) - len(line.lstrip('#'))
-                    elif re.match(r'^\d+\.', line):
-                        # Count the dots to determine level for numbered headings
-                        level = line.count('.') + 1
+                        heading_text = line.lstrip('#').strip()
                     else:
                         level = 1
-                        
-                    # Extract heading text
-                    if match.groups():
-                        heading_text = match.group(1)
-                    else:
-                        heading_text = line.rstrip(':')
+                        heading_text = line.rstrip(':').strip()
                     
                     heading = Heading(
-                        text=heading_text.strip(),
+                        text=heading_text,
                         level=level,
                         start_pos=current_pos,
-                        end_pos=current_pos + len(line)
+                        end_pos=current_pos + len(original_line)
                     )
                     headings.append(heading)
                     break
                     
-            current_pos += len(line) + 1
+            current_pos += len(original_line) + 1
             
         return headings
 
     def build_toc(self, headings: List[Heading]) -> List[Dict]:
         """Build table of contents from headings."""
-        def add_to_toc(heading: Heading, current_level: List[Dict], current_depth: int) -> None:
-            while current_depth >= len(current_level):
-                current_level.append([])
-            
+        if not headings:
+            return []
+
+        def add_to_toc(heading: Heading, current_level: List[Dict], level_map: Dict[int, Dict]) -> None:
             entry = {
                 'text': heading.text,
                 'level': heading.level,
@@ -86,21 +96,29 @@ class DocumentAnalyzer:
             }
             
             if heading.level == 1:
-                current_level[0].append(entry)
+                current_level.append(entry)
+                level_map[1] = entry
             else:
-                # Find appropriate parent
-                parent_level = current_level[heading.level - 2]
-                if parent_level:
-                    parent_level[-1]['children'].append(entry)
-                else:
-                    # No parent found, add at current level
-                    current_level[heading.level - 1].append(entry)
+                # Find the closest parent level
+                parent_level = heading.level - 1
+                while parent_level > 0:
+                    if parent_level in level_map:
+                        level_map[parent_level]['children'].append(entry)
+                        level_map[heading.level] = entry
+                        break
+                    parent_level -= 1
+                if parent_level == 0:
+                    # No parent found, add at root level
+                    current_level.append(entry)
+                    level_map[heading.level] = entry
 
-        toc_levels: List[List[Dict]] = []
+        toc = []
+        level_map = {}  # Track the last entry at each level
+        
         for heading in headings:
-            add_to_toc(heading, toc_levels, heading.level)
+            add_to_toc(heading, toc, level_map)
             
-        return toc_levels[0] if toc_levels else []
+        return toc
 
     def classify_document(self, text: str, title: str) -> str:
         """
@@ -110,43 +128,98 @@ class DocumentAnalyzer:
         # Prepare text for classification
         combined_text = f"{title}\n{text}".lower()
         
-        # Define classification keywords
+        # Define classification keywords with weights
         classification_keywords = {
-            'policies_procedures': ['policy', 'procedure', 'guideline', 'protocol', 'standard operating'],
-            'legal_compliance': ['legal', 'compliance', 'regulation', 'law', 'statute', 'regulatory'],
-            'finance_accounting': ['finance', 'accounting', 'budget', 'financial', 'revenue', 'expense'],
-            'human_resources': ['hr', 'human resources', 'employee', 'personnel', 'staff', 'recruitment'],
-            'it_technology': ['it', 'technology', 'software', 'hardware', 'system', 'network', 'cyber'],
-            'product_growth': ['product', 'growth', 'development', 'market', 'feature', 'roadmap'],
-            'customer_service_ops': ['customer service', 'operation', 'support', 'service desk'],
-            'training_knowledge': ['training', 'learning', 'education', 'knowledge', 'course'],
-            'risk_management': ['risk', 'mitigation', 'assessment', 'control', 'audit'],
-            'customer_client': ['client', 'customer', 'account', 'engagement'],
-            'strategic_planning': ['strategy', 'planning', 'objective', 'goal', 'initiative'],
-            'internal_communication': ['memo', 'announcement', 'internal', 'communication'],
-            'project_management': ['project', 'milestone', 'deliverable', 'timeline'],
-            'cost_procurement': ['cost', 'procurement', 'purchase', 'vendor', 'supplier'],
-            'data_analytics': ['data', 'analytics', 'report', 'metric', 'dashboard'],
-            'security': ['security', 'protection', 'safeguard', 'access control'],
-            'governance': ['governance', 'board', 'committee', 'oversight']
+            'human_resources': {
+                'high': ['hr', 'human resource', 'employee', 'personnel', 'staff', 'recruitment', 'policy manual'],
+                'medium': ['benefits', 'payroll', 'training', 'workplace', 'leave'],
+                'low': ['policy', 'management', 'guidelines']
+            },
+            'customer_service_ops': {
+                'high': ['customer service', 'support', 'service desk', 'helpdesk', 'operations'],
+                'medium': ['customer', 'client', 'ticket', 'inquiry'],
+                'low': ['help', 'assistance', 'response']
+            },
+            'finance_accounting': {
+                'high': ['finance', 'accounting', 'budget', 'financial', 'revenue', 'expense'],
+                'medium': ['cost', 'profit', 'loss', 'balance'],
+                'low': ['money', 'payment', 'price']
+            },
+            'it_technology': {
+                'high': ['it', 'technology', 'software', 'hardware', 'system', 'network', 'cyber'],
+                'medium': ['computer', 'data', 'security', 'infrastructure'],
+                'low': ['digital', 'online', 'electronic']
+            },
+            'risk_management': {
+                'high': ['risk', 'mitigation', 'assessment', 'control', 'audit'],
+                'medium': ['compliance', 'security', 'safety'],
+                'low': ['review', 'evaluation', 'monitoring']
+            },
+            'training_knowledge': {
+                'high': ['training', 'learning', 'education', 'knowledge', 'course'],
+                'medium': ['workshop', 'seminar', 'instruction', 'guide'],
+                'low': ['manual', 'documentation', 'reference']
+            },
+            'product_growth': {
+                'high': ['product', 'growth', 'development', 'market', 'feature', 'roadmap'],
+                'medium': ['strategy', 'innovation', 'launch', 'release'],
+                'low': ['plan', 'improvement', 'update']
+            },
+            'legal_compliance': {
+                'high': ['legal', 'compliance', 'regulation', 'law', 'statute', 'regulatory'],
+                'medium': ['requirements', 'obligations', 'guidelines'],
+                'low': ['policy', 'rules']
+            },
+            'policies_procedures': {
+                'high': ['policy', 'procedure', 'guideline', 'protocol', 'standard operating'],
+                'medium': ['compliance', 'requirements', 'rules', 'regulations'],
+                'low': ['process', 'steps', 'instructions']
+            }
         }
         
         # Score each classification
         scores = {category: 0 for category in DOCUMENT_CLASSIFICATIONS.keys()}
         
         for category, keywords in classification_keywords.items():
-            for keyword in keywords:
+            # High priority keywords (weight: 5)
+            for keyword in keywords.get('high', []):
+                count = combined_text.count(keyword)
+                scores[category] += count * 5
+            
+            # Medium priority keywords (weight: 3)
+            for keyword in keywords.get('medium', []):
+                count = combined_text.count(keyword)
+                scores[category] += count * 3
+            
+            # Low priority keywords (weight: 1)
+            for keyword in keywords.get('low', []):
                 count = combined_text.count(keyword)
                 scores[category] += count
                 
         # Get category with highest score
         max_score = max(scores.values())
         if max_score > 0:
-            category = max(scores.items(), key=lambda x: x[1])[0]
+            # If there's a tie, prefer more specific categories
+            max_categories = [cat for cat, score in scores.items() if score == max_score]
+            if len(max_categories) > 1:
+                priority_order = [
+                    'human_resources',
+                    'customer_service_ops',
+                    'finance_accounting',
+                    'it_technology',
+                    'risk_management',
+                    'training_knowledge',
+                    'product_growth',
+                    'legal_compliance',
+                    'policies_procedures',
+                    'miscellaneous'
+                ]
+                for category in priority_order:
+                    if category in max_categories:
+                        return category
+            return max_categories[0]
         else:
-            category = 'miscellaneous'
-            
-        return category
+            return 'miscellaneous'
 
     def analyze_document(self, text: str, title: str) -> Dict:
         """
@@ -159,6 +232,11 @@ class DocumentAnalyzer:
             - headings: list of extracted headings
         """
         try:
+            if not isinstance(text, str):
+                text = str(text) if text is not None else ""
+            if not isinstance(title, str):
+                title = str(title) if title is not None else ""
+                
             # Extract headings
             headings = self.extract_headings(text)
             
