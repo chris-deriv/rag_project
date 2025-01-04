@@ -14,7 +14,7 @@ import subprocess
 import tempfile
 from .database import VectorDatabase
 from .embedding import EmbeddingGenerator
-from .document_analyzer import document_analyzer
+from .document_analyzer import document_analyzer, DocumentAnalyzer
 from config.dynamic_settings import settings_manager
 
 # Configure logging with immediate output
@@ -38,7 +38,6 @@ class ProcessingState:
     toc: Optional[List[Dict]] = None
 
 @dataclass
-@dataclass
 class DocumentChunk:
     """Represents a chunk of text from a document with metadata."""
     id: str
@@ -48,12 +47,13 @@ class DocumentChunk:
 class DocumentProcessor:
     """Handles document processing with advanced chunking strategies."""
     
-    def __init__(self, length_function: str = "char"):
+    def __init__(self, length_function: str = "char", analyzer: Optional[DocumentAnalyzer] = None):
         """Initialize the document processor."""
         # Get initial settings
         self.settings = settings_manager.get_all_settings()
         self.length_function = length_function
         self.tokenizer = tiktoken.get_encoding("cl100k_base")
+        self.analyzer = analyzer or document_analyzer
         
         # Initialize text splitter with settings
         self._init_text_splitter()
@@ -90,18 +90,28 @@ class DocumentProcessor:
             
         file_ext = os.path.splitext(file_path)[1].lower()
         if file_ext == '.pdf':
-            sections = self._extract_pdf_text(file_path)
+            title, full_text, sections = self._extract_pdf_text(file_path)
         elif file_ext in ['.doc', '.docx']:
-            sections = self._extract_docx_text(file_path)
+            title, full_text, sections = self._extract_docx_text(file_path)
         else:
             raise ValueError(f"Unsupported file type: {file_ext}")
             
+        # Analyze document structure and classification
+        logger.info(f"Analyzing document: {title}")
+        analysis = self.analyzer.analyze_document(full_text, title)
+        logger.info(f"Document analysis result: {analysis}")
+            
         chunks = []
         for section in sections:
+            metadata = section['metadata']
+            metadata.update({
+                'classification': analysis['classification'],
+                'toc': analysis['toc']
+            })
             chunk = DocumentChunk(
                 id=str(uuid.uuid4()),
                 text=section['text'],
-                metadata=section['metadata']
+                metadata=metadata
             )
             chunks.append(chunk)
             
@@ -126,7 +136,7 @@ class DocumentProcessor:
             return first_line
         return None
         
-    def _extract_pdf_text(self, file_path: str) -> List[Dict]:
+    def _extract_pdf_text(self, file_path: str) -> Tuple[str, str, List[Dict]]:
         """Extract text and metadata from PDF file."""
         sections = []
         try:
@@ -145,11 +155,8 @@ class DocumentProcessor:
             if not title:
                 title = os.path.splitext(os.path.basename(file_path))[0]
 
-            # Extract full text for analysis
+            # Extract full text
             full_text = "\n".join(page.extract_text() for page in reader.pages)
-            
-            # Analyze document structure and classification
-            analysis = document_analyzer.analyze_document(full_text, title)
             
             for i, page in enumerate(reader.pages):
                 text = page.extract_text()
@@ -162,17 +169,15 @@ class DocumentProcessor:
                             'file_type': 'pdf',
                             'section_type': 'content',
                             'chunk_index': i,
-                            'total_chunks': total_pages,
-                            'classification': analysis['classification'],
-                            'toc': analysis['toc']
+                            'total_chunks': total_pages
                         }
                     })
         except Exception as e:
             raise ValueError(f"Error processing PDF: {str(e)}")
             
-        return sections
+        return title, full_text, sections
         
-    def _extract_docx_text(self, file_path: str) -> List[Dict]:
+    def _extract_docx_text(self, file_path: str) -> Tuple[str, str, List[Dict]]:
         """Extract text and metadata from DOCX file."""
         sections = []
         try:
@@ -237,11 +242,8 @@ class DocumentProcessor:
             if not title:
                 title = os.path.splitext(os.path.basename(file_path))[0]
 
-            # Extract full text for analysis
+            # Extract full text
             full_text = "\n".join(para.text for para in doc.paragraphs)
-            
-            # Analyze document structure and classification
-            analysis = document_analyzer.analyze_document(full_text, title)
             
             # Only include non-empty paragraphs and normalize indices
             non_empty_sections = []
@@ -261,15 +263,13 @@ class DocumentProcessor:
                         'file_type': 'docx',
                         'section_type': 'content',
                         'chunk_index': i,
-                        'total_chunks': total_sections,
-                        'classification': analysis['classification'],
-                        'toc': analysis['toc']
+                        'total_chunks': total_sections
                     }
                 })
         except Exception as e:
             raise ValueError(f"Error processing DOCX: {str(e)}")
             
-        return sections
+        return title, full_text, sections
 
     def __del__(self):
         """Clean up by removing observer when object is destroyed."""
@@ -281,8 +281,8 @@ class DocumentProcessor:
 class DocumentStore:
     """Manages document storage and retrieval with atomic operations."""
     
-    def __init__(self):
-        self.processor = DocumentProcessor()
+    def __init__(self, processor: Optional[DocumentProcessor] = None):
+        self.processor = processor or DocumentProcessor()
         self.db = VectorDatabase()
         self.embedding_generator = EmbeddingGenerator()
         self._processing_states = {}  # Track processing states
@@ -419,7 +419,9 @@ class DocumentStore:
             'source_name': source_name,
             'title': chunks[0].get('title', ''),
             'chunk_count': len(chunks),
-            'total_chunks': chunks[0].get('total_chunks', len(chunks))
+            'total_chunks': chunks[0].get('total_chunks', len(chunks)),
+            'classification': chunks[0].get('classification'),
+            'toc': chunks[0].get('toc')
         }
 
 # Initialize global document store

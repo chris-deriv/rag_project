@@ -5,22 +5,49 @@ import os
 from unittest.mock import Mock, patch, PropertyMock
 import numpy as np
 from src.documents import DocumentStore, DocumentProcessor, DocumentChunk, ProcessingState
-from src.document_analyzer import document_analyzer
 
 @pytest.fixture
 def mock_extract_text():
     with patch('src.documents.DocumentProcessor._extract_pdf_text') as mock:
+        mock.return_value = (
+            'Test Document',  # title
+            'Test section 1\nTest section 2',  # full_text
+            [  # sections
+                {
+                    'text': 'Test section 1',
+                    'metadata': {
+                        'source_name': 'test.pdf',
+                        'title': 'Test Document',
+                        'file_type': 'pdf',
+                        'section_type': 'content',
+                        'chunk_index': 0,
+                        'total_chunks': 2
+                    }
+                },
+                {
+                    'text': 'Test section 2',
+                    'metadata': {
+                        'source_name': 'test.pdf',
+                        'title': 'Test Document',
+                        'file_type': 'pdf',
+                        'section_type': 'content',
+                        'chunk_index': 1,
+                        'total_chunks': 2
+                    }
+                }
+            ]
+        )
         yield mock
 
 @pytest.fixture
 def mock_document_analyzer():
-    with patch('src.documents.document_analyzer') as mock:
-        mock.analyze_document.return_value = {
-            'classification': 'policies_procedures',
-            'toc': [{'text': 'Test Document', 'level': 1, 'children': []}],
-            'headings': [{'text': 'Test Document', 'level': 1, 'start_pos': 0, 'end_pos': 12}]
-        }
-        yield mock
+    mock = Mock()
+    mock.analyze_document.return_value = {
+        'classification': 'policies_procedures',
+        'toc': [{'text': 'Test Document', 'level': 1, 'children': []}],
+        'headings': [{'text': 'Test Document', 'level': 1, 'start_pos': 0, 'end_pos': 12}]
+    }
+    return mock
 
 class TestProcessingState:
     def test_processing_state_initialization(self):
@@ -62,36 +89,6 @@ class TestDocumentStore:
             test_pdf = f.name
             test_pdf_name = os.path.basename(test_pdf)
 
-        # Configure mock PDF extraction with actual temp filename
-        mock_extract_text.return_value = [
-            {
-                'text': 'Test section 1',
-                'metadata': {
-                    'source_name': test_pdf_name,
-                    'title': 'Test Document',
-                    'file_type': 'pdf',
-                    'section_type': 'content',
-                    'chunk_index': 0,
-                    'total_chunks': 2,
-                    'classification': 'policies_procedures',
-                    'toc': [{'text': 'Test Document', 'level': 1, 'children': []}]
-                }
-            },
-            {
-                'text': 'Test section 2',
-                'metadata': {
-                    'source_name': test_pdf_name,
-                    'title': 'Test Document',
-                    'file_type': 'pdf',
-                    'section_type': 'content',
-                    'chunk_index': 1,
-                    'total_chunks': 2,
-                    'classification': 'policies_procedures',
-                    'toc': [{'text': 'Test Document', 'level': 1, 'children': []}]
-                }
-            }
-        ]
-
         # Create mock EmbeddingGenerator
         mock_embedding_generator = Mock()
         mock_embedding_generator.generate_embeddings.return_value = mock_embeddings
@@ -100,7 +97,7 @@ class TestDocumentStore:
         mock_vector_db = Mock()
         mock_vector_db.get_document_chunks.return_value = [
             {
-                'id': 1, 
+                'id': 1,
                 'text': 'Test section 1',
                 'chunk_index': 0,
                 'total_chunks': 2,
@@ -108,7 +105,7 @@ class TestDocumentStore:
                 'toc': [{'text': 'Test Document', 'level': 1, 'children': []}]
             },
             {
-                'id': 2, 
+                'id': 2,
                 'text': 'Test section 2',
                 'chunk_index': 1,
                 'total_chunks': 2,
@@ -121,7 +118,9 @@ class TestDocumentStore:
             # Initialize store with mocked dependencies
             with patch('src.documents.EmbeddingGenerator', return_value=mock_embedding_generator):
                 with patch('src.documents.VectorDatabase', return_value=mock_vector_db):
-                    store = DocumentStore()
+                    # Create processor with mock analyzer
+                    processor = DocumentProcessor(analyzer=mock_document_analyzer)
+                    store = DocumentStore(processor=processor)
                     state = store.process_and_store_document(test_pdf)
 
             # Verify state tracking
@@ -231,44 +230,45 @@ class TestDocumentStore:
 class TestDocumentProcessor:
     def test_process_document(self, mock_document_analyzer):
         """Test document processing."""
-        processor = DocumentProcessor()
+        # Create processor with mock analyzer
+        processor = DocumentProcessor(analyzer=mock_document_analyzer)
 
         # Create a temporary PDF file
         with tempfile.NamedTemporaryFile(suffix='.pdf', mode='w+b', delete=False) as f:
             test_pdf = f.name
 
         # Configure mock PDF extraction
-        mock_sections = [
-            {
-                'text': 'Test section 1',
-                'metadata': {
-                    'source_name': 'test.pdf',
-                    'title': 'Test Document',
-                    'file_type': 'pdf',
-                    'section_type': 'content',
-                    'chunk_index': 0,
-                    'total_chunks': 2,
-                    'classification': 'policies_procedures',
-                    'toc': [{'text': 'Test Document', 'level': 1, 'children': []}]
+        mock_extract = (
+            'Test Document',  # title
+            'Test section 1\nTest section 2',  # full_text
+            [  # sections
+                {
+                    'text': 'Test section 1',
+                    'metadata': {
+                        'source_name': 'test.pdf',
+                        'title': 'Test Document',
+                        'file_type': 'pdf',
+                        'section_type': 'content',
+                        'chunk_index': 0,
+                        'total_chunks': 2
+                    }
+                },
+                {
+                    'text': 'Test section 2',
+                    'metadata': {
+                        'source_name': 'test.pdf',
+                        'title': 'Test Document',
+                        'file_type': 'pdf',
+                        'section_type': 'content',
+                        'chunk_index': 1,
+                        'total_chunks': 2
+                    }
                 }
-            },
-            {
-                'text': 'Test section 2',
-                'metadata': {
-                    'source_name': 'test.pdf',
-                    'title': 'Test Document',
-                    'file_type': 'pdf',
-                    'section_type': 'content',
-                    'chunk_index': 1,
-                    'total_chunks': 2,
-                    'classification': 'policies_procedures',
-                    'toc': [{'text': 'Test Document', 'level': 1, 'children': []}]
-                }
-            }
-        ]
+            ]
+        )
 
         try:
-            with patch.object(processor, '_extract_pdf_text', return_value=mock_sections):
+            with patch.object(processor, '_extract_pdf_text', return_value=mock_extract):
                 chunks = processor.process_document(test_pdf)
 
             # Verify document analysis was called
@@ -309,34 +309,34 @@ class TestDocumentProcessor:
             test_pdf_name = os.path.basename(test_pdf)
 
         # Configure mock PDF extraction with inconsistent total_chunks
-        mock_extract_text.return_value = [
-            {
-                'text': 'Test section 1',
-                'metadata': {
-                    'source_name': test_pdf_name,
-                    'title': 'Test Document',
-                    'file_type': 'pdf',
-                    'section_type': 'content',
-                    'chunk_index': 0,
-                    'total_chunks': 3,  # Wrong total
-                    'classification': 'policies_procedures',
-                    'toc': [{'text': 'Test Document', 'level': 1, 'children': []}]
+        mock_extract_text.return_value = (
+            'Test Document',  # title
+            'Test section 1\nTest section 2',  # full_text
+            [  # sections
+                {
+                    'text': 'Test section 1',
+                    'metadata': {
+                        'source_name': test_pdf_name,
+                        'title': 'Test Document',
+                        'file_type': 'pdf',
+                        'section_type': 'content',
+                        'chunk_index': 0,
+                        'total_chunks': 3  # Wrong total
+                    }
+                },
+                {
+                    'text': 'Test section 2',
+                    'metadata': {
+                        'source_name': test_pdf_name,
+                        'title': 'Test Document',
+                        'file_type': 'pdf',
+                        'section_type': 'content',
+                        'chunk_index': 1,
+                        'total_chunks': 3  # Wrong total
+                    }
                 }
-            },
-            {
-                'text': 'Test section 2',
-                'metadata': {
-                    'source_name': test_pdf_name,
-                    'title': 'Test Document',
-                    'file_type': 'pdf',
-                    'section_type': 'content',
-                    'chunk_index': 1,
-                    'total_chunks': 3,  # Wrong total
-                    'classification': 'policies_procedures',
-                    'toc': [{'text': 'Test Document', 'level': 1, 'children': []}]
-                }
-            }
-        ]
+            ]
+        )
 
         # Create mock dependencies
         mock_embedding_generator = Mock()
@@ -352,7 +352,9 @@ class TestDocumentProcessor:
             # Initialize store with mocked dependencies
             with patch('src.documents.EmbeddingGenerator', return_value=mock_embedding_generator):
                 with patch('src.documents.VectorDatabase', return_value=mock_vector_db):
-                    store = DocumentStore()
+                    # Create processor with mock analyzer
+                    processor = DocumentProcessor(analyzer=mock_document_analyzer)
+                    store = DocumentStore(processor=processor)
                     with pytest.raises(ValueError) as exc_info:
                         state = store.process_and_store_document(test_pdf)
                     assert "total_chunks mismatch" in str(exc_info.value)
@@ -417,7 +419,7 @@ class TestDocumentProcessor:
         
         with patch('src.documents.Document', return_value=mock_doc):
             # Should not raise exception, should handle property error gracefully
-            sections = processor._extract_docx_text("test.docx")
+            title, full_text, sections = processor._extract_docx_text("test.docx")
             assert isinstance(sections, list)
 
     def test_docx_title_extraction(self):
@@ -434,7 +436,8 @@ class TestDocumentProcessor:
         type(mock_doc).core_properties = PropertyMock(return_value=mock_properties)
         
         with patch('src.documents.Document', return_value=mock_doc):
-            sections = processor._extract_docx_text("test.docx")
+            title, full_text, sections = processor._extract_docx_text("test.docx")
+            assert title == "Document Title"
             assert sections[0]['metadata']['title'] == "Document Title"
         
         # Test with missing core_properties attribute
@@ -444,8 +447,9 @@ class TestDocumentProcessor:
         mock_doc.paragraphs = [mock_para]  # Make paragraphs iterable
         
         with patch('src.documents.Document', return_value=mock_doc):
-            sections = processor._extract_docx_text("test.docx")
+            title, full_text, sections = processor._extract_docx_text("test.docx")
             # Should fall back to first paragraph or filename
+            assert title in ["First paragraph", "test"]
             assert sections[0]['metadata']['title'] in ["First paragraph", "test"]
         
         # Test with None title in core properties
@@ -458,8 +462,9 @@ class TestDocumentProcessor:
         type(mock_doc).core_properties = PropertyMock(return_value=mock_properties)
         
         with patch('src.documents.Document', return_value=mock_doc):
-            sections = processor._extract_docx_text("test.docx")
+            title, full_text, sections = processor._extract_docx_text("test.docx")
             # Should fall back to first paragraph or filename
+            assert title in ["First paragraph", "test"]
             assert sections[0]['metadata']['title'] in ["First paragraph", "test"]
 
     def test_error_handling(self):
