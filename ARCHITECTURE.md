@@ -35,9 +35,16 @@ The system implements a sophisticated RAG (Retrieval Augmented Generation) pipel
 - Two-stage process:
   * Vector similarity search
   * LLM-based reranking
-- Weighted scoring:
-  * 40% vector similarity
-  * 60% LLM relevance
+- Dynamic weighted scoring based on temperature:
+  * Temperature range: 0.0-1.0 (default: 0.3)
+  * Weighting formula: relevance_weight = 0.5 + (temp * 0.4)
+  * Examples:
+    - At temp=0.0: 50/50 split (balanced)
+    - At temp=0.3: 62/38 split (default, slightly focused)
+    - At temp=0.7: 78/22 split (creative)
+    - At temp=1.0: 90/10 split (highly diverse)
+  * Lower temperatures favor deterministic vector similarity
+  * Higher temperatures favor creative LLM relevance scoring
 - Performance optimizations:
   * Result caching
   * Batch processing
@@ -233,9 +240,10 @@ def rerank_results(self, query: str, search_results: Dict[str, Any]) -> List[Dic
   - Evaluates related information (medium relevance)
   - Identifies tangential content (low relevance)
 - Score combination:
-  - Vector similarity weight: 40%
-  - LLM relevance weight: 60%
-  - Normalized to 0-1 scale
+  - Dynamic weights based on temperature setting
+  - Both scores normalized to 0-1 scale
+  - Weighted average: (distance_weight * similarity) + (relevance_weight * llm_score)
+  - Final scores sorted by combined score and chunk ID
 - Performance optimizations:
   - Score caching per query-text pair
   - Only queries LLM for uncached texts

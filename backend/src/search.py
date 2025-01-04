@@ -172,9 +172,9 @@ class SearchEngine:
             norm_distance = 1 - (distances[i] / max_distance)
             norm_relevance = relevance_scores[i] / 10
             # Use temperature from settings to adjust weighting
-            temp = self.settings['llm']['temperature']
+            temp = self.settings['llm']['temperature']  # Now 0-1 range
             # Higher temperature -> more weight on relevance scores
-            relevance_weight = 0.5 + (temp * 0.2)  # 0.5-0.9 based on temperature
+            relevance_weight = 0.5 + (temp * 0.4)  # 0.5-0.9 based on temperature 0-1
             distance_weight = 1 - relevance_weight
             combined_score = (distance_weight * norm_distance) + (relevance_weight * norm_relevance)
             

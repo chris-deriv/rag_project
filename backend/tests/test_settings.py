@@ -14,8 +14,8 @@ def test_llm_settings_validation():
     settings = LLMSettings(temperature=0.7, max_tokens=1000, model="gpt-3.5-turbo")
     assert settings.validate() is True
 
-    # Invalid temperature
-    settings = LLMSettings(temperature=2.5, max_tokens=1000, model="gpt-3.5-turbo")
+    # Invalid temperature (> 1.0)
+    settings = LLMSettings(temperature=1.5, max_tokens=1000, model="gpt-3.5-turbo")
     assert settings.validate() is False
 
     # Invalid max_tokens
@@ -104,7 +104,7 @@ def test_dynamic_settings_invalid_update():
     # Invalid temperature
     new_settings = {
         'llm': {
-            'temperature': 3.0,  # Invalid: > 2.0
+            'temperature': 1.5,  # Invalid: > 1.0
             'max_tokens': 1000,
             'model': 'gpt-3.5-turbo'
         }
@@ -112,7 +112,7 @@ def test_dynamic_settings_invalid_update():
     
     success = settings.update_settings(new_settings)
     assert success is False
-    assert settings.llm.temperature != 3.0  # Original value should be preserved
+    assert settings.llm.temperature != 1.5  # Original value should be preserved
 
 def test_dynamic_settings_partial_update():
     """Test partial update of settings."""

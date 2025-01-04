@@ -77,8 +77,8 @@ class LLMSettings:
 
     def validate(self) -> bool:
         """Validate LLM settings."""
-        if not 0 <= self.temperature <= 2:
-            logger.error(f"Invalid temperature: {self.temperature}. Must be between 0 and 2.")
+        if not 0 <= self.temperature <= 1:  # Fixed: temperature range 0-1
+            logger.error(f"Invalid temperature: {self.temperature}. Must be between 0 and 1.")
             return False
         if self.max_tokens < 1:
             logger.error(f"Invalid max_tokens: {self.max_tokens}. Must be positive.")
