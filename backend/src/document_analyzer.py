@@ -32,25 +32,62 @@ class DocumentAnalyzer:
     def __init__(self):
         """Initialize the document analyzer."""
         self.heading_patterns = [re.compile(pattern) for pattern in HEADING_PATTERNS]
+
+    def _clean_section_number(self, number: str) -> str:
+        """Clean section number by removing trailing periods."""
+        # Handle special prefixes
+        for prefix in ['Section', 'Chapter', 'Part', 'Appendix']:
+            if number.startswith(prefix):
+                parts = number.split(' ', 1)
+                if len(parts) > 1:
+                    return f"{prefix} {parts[1].rstrip('.')}"
+                return number
         
-    def _get_section_level(self, section_number: str) -> int:
+        # Remove trailing period
+        return number.rstrip('.')
+
+    def _get_section_level(self, section_number: str, is_markdown: bool = False) -> int:
         """Determine heading level from section number format."""
+        if is_markdown:
+            return len(section_number)
+            
         if not section_number:
             return 1
+
+        # Handle special prefixes
+        if any(prefix in section_number for prefix in ['Section', 'Chapter', 'Part']):
+            return 1
+        elif 'Appendix' in section_number:
+            return 2
+
+        # Handle letter-based sections with subsections
+        if re.match(r'^[A-Z]$', section_number):  # Single letter (A, B, etc.)
+            return 1
+        elif re.match(r'^[A-Z]\.\d+', section_number):  # Letter with subsection (A.1, etc.)
+            return 2
+        elif re.match(r'^[A-Z](?:\.\d+){2,}', section_number):  # Letter with multiple subsections (A.1.1, etc.)
+            return 3
+
+        # Handle Roman numerals
+        if re.match(r'^[IVX]+$', section_number):  # Single Roman numeral (I, II, etc.)
+            return 1
+        elif re.match(r'^[IVX]+\.\d+', section_number):  # Roman numeral with subsection (I.1, etc.)
+            return 2
+
+        # Handle numeric sections
+        if re.match(r'^\d+$', section_number):  # Single number (1, 2, etc.)
+            return 1
+        elif re.match(r'^\d+\.[a-z]', section_number):  # Number with letter (1.a, etc.)
+            return 2
+        elif re.match(r'^\d+\.\d+\.[a-z]', section_number):  # Number with subsection and letter (2.1.a)
+            return 3
+        elif re.match(r'^\d+\.\d+', section_number):  # Number with subsection (1.1, etc.)
+            return 2
             
-        # Check each section number format
-        for format_name, pattern in SECTION_NUMBER_FORMATS.items():
-            if re.match(pattern, section_number):
-                if format_name in ['numeric', 'alpha', 'mixed']:
-                    # Count dots for hierarchical depth
-                    return section_number.count('.') + 1
-                elif format_name == 'roman':
-                    # Roman numerals usually indicate major sections
-                    return section_number.count('.') + 2
         return 1
 
     def extract_headings(self, text: str) -> List[Heading]:
-        """Extract headings from document text with preserved section numbers."""
+        """Extract headings from document text."""
         headings = []
         lines = text.split('\n')
         current_pos = 0
@@ -62,38 +99,43 @@ class DocumentAnalyzer:
                 current_pos += len(original_line) + 1
                 continue
             
-            heading_found = False
             # Try each heading pattern
             for pattern in self.heading_patterns:
-                match = re.match(pattern, line)
+                match = pattern.match(line)
                 if match:
-                    if line.startswith('#'):
-                        # Markdown heading
-                        level = len(line) - len(line.lstrip('#'))
-                        heading_text = line.lstrip('#').strip()
-                        section_number = ''
-                    elif len(match.groups()) == 2:
-                        # Pattern with section number and text
-                        section_number = match.group(1).strip()
+                    if pattern.pattern == r'^(#{1,6})\s+(.+)$':  # Markdown heading
+                        level = len(match.group(1))
                         heading_text = match.group(2).strip()
-                        level = self._get_section_level(section_number)
                     else:
-                        # Pattern with just text (e.g., ALL CAPS)
-                        heading_text = match.group(1).strip()
-                        section_number = ''
-                        level = 1
-                    
-                    # Combine section number and text if both exist
-                    full_text = f"{section_number} {heading_text}" if section_number else heading_text
+                        # For all other patterns
+                        if len(match.groups()) == 2:
+                            prefix = match.group(1).strip()
+                            text_part = match.group(2).strip() if match.group(2) else ''
+                            
+                            # Handle special cases
+                            if prefix.isupper() and (':' in prefix or not text_part):  # ALL CAPS
+                                heading_text = prefix + (' ' + text_part if text_part else '')
+                                level = 1
+                            elif re.match(r'^[A-Z][a-z]+\s+[A-Z][a-z]+:', prefix):  # Title Case Header:
+                                heading_text = prefix + text_part
+                                level = 1
+                            else:
+                                # Clean section number and determine level
+                                cleaned_prefix = self._clean_section_number(prefix)
+                                level = self._get_section_level(cleaned_prefix)
+                                heading_text = f"{cleaned_prefix}{' ' + text_part if text_part else ''}"
+                        else:
+                            # Fallback for simple headings
+                            heading_text = match.group(0).strip()
+                            level = 1
                     
                     heading = Heading(
-                        text=full_text.strip(),
+                        text=heading_text.strip(),
                         level=level,
                         start_pos=current_pos,
                         end_pos=current_pos + len(original_line)
                     )
                     headings.append(heading)
-                    heading_found = True
                     break
             
             current_pos += len(original_line) + 1

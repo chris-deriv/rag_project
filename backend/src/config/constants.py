@@ -24,30 +24,39 @@ DOCUMENT_CLASSIFICATIONS = {
 
 # Document Structure
 HEADING_PATTERNS = [
-    # Numbered section patterns (capture both number and text)
-    r'^(\d+\.(?:\d+)*)\s+(.+)$',  # Basic numbered (1.1, 1.2.3, etc.)
-    r'^(\d+\.(?:\d+)*[A-Za-z]?)\s+(.+)$',  # With optional letter (1.1a, 2.3b)
-    r'^([A-Z]\.(?:\d+)*)\s+(.+)$',  # Letter-based (A.1, B.2.1)
+    # Markdown headings (must come first)
+    r'^(#{1,6})\s+(.+)$',  # Captures level and text
     
-    # Standard heading markers
-    r'^#{1,6}\s+(.+)$',  # Markdown headings
+    # Common document sections (must come before numbered sections)
+    r'^((?:Section|Chapter|Part)\s+\d+(?:\.\d+)*):?\s*(.+)$',  # Section 1.1: Title
+    r'^(Appendix\s+[A-Z](?:\.\d+)*):?\s*(.+)$',  # Appendix A.1: Title
     
-    # Common document sections (capture number and text)
-    r'^(?:Section|Chapter|Part)\s+(\d+(?:\.\d+)*):?\s*(.+)$',  # Section 1.1: Title
-    r'^(?:Appendix)\s+([A-Z](?:\.\d+)*):?\s*(.+)$',  # Appendix A.1: Title
+    # Letter-based sections (must come before numeric)
+    r'^([A-Z]\.?)\s+(.+)$',  # A., B., etc.
+    r'^([A-Z](?:\.\d+)+\.?)\s+(.+)$',  # A.1., A.1.1., etc.
+    r'^([IVX]+\.?)\s+(.+)$',  # I., II., etc.
+    r'^([IVX]+(?:\.\d+)+\.?)\s+(.+)$',  # I.1., IV.2., etc.
     
-    # Special formats
-    r'^([IVX]+\.(?:\d+)*)\s+(.+)$',  # Roman numerals (I.1, IV.2)
-    r'^([A-Z][A-Za-z\s]+):\s*(.+)$',  # Title case with content: Text
-    r'^([A-Z][A-Z\s]+(?:\s|$))(.+)?$'  # All caps with optional content
+    # Mixed alphanumeric sections (must come before pure numeric)
+    r'^(\d+(?:\.\d+)*\.[a-z]\.?)\s+(.+)$',  # 2.1.a., etc.
+    r'^(\d+\.[a-z]\.?)\s+(.+)$',  # 1.a., etc.
+    
+    # Numbered sections with subsections
+    r'^(\d+(?:\.\d+)*\.?)\s+(.+)$',  # 1., 1.1., 1.1.1., etc.
+    
+    # Special formats (must come last)
+    r'^([A-Z][A-Z\s]+[A-Z]):?\s*(.+)?$',  # ALL CAPS: Text
+    r'^([A-Z][A-Z\s]+(?:\s+[A-Z])+)(?:\s+|$)(.*)$',  # ALL CAPS MULTIPLE WORDS
+    r'^([A-Z][a-z]+\s+[A-Z][a-z]+):(.*)$',  # Title Case Header: Text
 ]
 
 # Section number format mapping
 SECTION_NUMBER_FORMATS = {
-    'numeric': r'^\d+\.(?:\d+)*$',  # 1.1, 1.2.3
-    'alpha': r'^[A-Z]\.(?:\d+)*$',  # A.1, B.2.1
-    'roman': r'^[IVX]+\.(?:\d+)*$',  # I.1, IV.2.1
-    'mixed': r'^\d+\.(?:\d+)*[A-Za-z]?$'  # 1.1a, 2.3b
+    'numeric': r'^\d+(?:\.\d+)*\.?$',  # 1, 1.1, 1.1.1
+    'alpha': r'^[A-Z](?:\.\d+)*\.?$',  # A, A.1, A.1.1
+    'roman': r'^[IVX]+(?:\.\d+)*\.?$',  # I, I.1, IV.2
+    'mixed': r'^\d+(?:\.\d+)*[a-z]\.?$',  # 1a, 1.1a, 2.1.a
+    'section': r'^(?:Section|Chapter|Part|Appendix)\s+(?:\d+|\w+)(?:\.\d+)*\.?$'  # Section 1.1, Appendix A.1
 }
 
 # API Response Keys
