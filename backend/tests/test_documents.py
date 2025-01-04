@@ -5,10 +5,21 @@ import os
 from unittest.mock import Mock, patch, PropertyMock
 import numpy as np
 from src.documents import DocumentStore, DocumentProcessor, DocumentChunk, ProcessingState
+from src.document_analyzer import document_analyzer
 
 @pytest.fixture
 def mock_extract_text():
     with patch('src.documents.DocumentProcessor._extract_pdf_text') as mock:
+        yield mock
+
+@pytest.fixture
+def mock_document_analyzer():
+    with patch('src.documents.document_analyzer') as mock:
+        mock.analyze_document.return_value = {
+            'classification': 'policies_procedures',
+            'toc': [{'text': 'Test Document', 'level': 1, 'children': []}],
+            'headings': [{'text': 'Test Document', 'level': 1, 'start_pos': 0, 'end_pos': 12}]
+        }
         yield mock
 
 class TestProcessingState:
@@ -20,6 +31,8 @@ class TestProcessingState:
         assert state.source_name is None
         assert state.chunk_count == 0
         assert state.total_chunks == 0
+        assert state.classification is None
+        assert state.toc is None
 
     def test_processing_state_updates(self):
         """Test ProcessingState updates."""
@@ -28,15 +41,18 @@ class TestProcessingState:
         state.source_name = 'test.pdf'
         state.chunk_count = 5
         state.total_chunks = 5
+        state.classification = 'policies_procedures'
+        state.toc = [{'text': 'Test', 'level': 1, 'children': []}]
         
         assert state.status == 'completed'
         assert state.source_name == 'test.pdf'
         assert state.chunk_count == 5
         assert state.total_chunks == 5
+        assert state.classification == 'policies_procedures'
+        assert len(state.toc) == 1
 
 class TestDocumentStore:
-    @pytest.mark.usefixtures("mock_extract_text")
-    def test_process_and_store_document_with_cleanup(self, mock_extract_text):
+    def test_process_and_store_document_with_cleanup(self, mock_extract_text, mock_document_analyzer):
         """Test processing and storing a document."""
         # Create mock embeddings
         mock_embeddings = np.array([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]])
@@ -56,7 +72,9 @@ class TestDocumentStore:
                     'file_type': 'pdf',
                     'section_type': 'content',
                     'chunk_index': 0,
-                    'total_chunks': 2
+                    'total_chunks': 2,
+                    'classification': 'policies_procedures',
+                    'toc': [{'text': 'Test Document', 'level': 1, 'children': []}]
                 }
             },
             {
@@ -67,7 +85,9 @@ class TestDocumentStore:
                     'file_type': 'pdf',
                     'section_type': 'content',
                     'chunk_index': 1,
-                    'total_chunks': 2
+                    'total_chunks': 2,
+                    'classification': 'policies_procedures',
+                    'toc': [{'text': 'Test Document', 'level': 1, 'children': []}]
                 }
             }
         ]
@@ -83,13 +103,17 @@ class TestDocumentStore:
                 'id': 1, 
                 'text': 'Test section 1',
                 'chunk_index': 0,
-                'total_chunks': 2
+                'total_chunks': 2,
+                'classification': 'policies_procedures',
+                'toc': [{'text': 'Test Document', 'level': 1, 'children': []}]
             },
             {
                 'id': 2, 
                 'text': 'Test section 2',
                 'chunk_index': 1,
-                'total_chunks': 2
+                'total_chunks': 2,
+                'classification': 'policies_procedures',
+                'toc': [{'text': 'Test Document', 'level': 1, 'children': []}]
             }
         ]
 
@@ -106,6 +130,12 @@ class TestDocumentStore:
             assert state.chunk_count == 2
             assert state.total_chunks == 2
             assert state.error is None
+            assert state.classification == 'policies_procedures'
+            assert len(state.toc) == 1
+            assert state.toc[0]['text'] == 'Test Document'
+
+            # Verify document analysis was called
+            mock_document_analyzer.analyze_document.assert_called_once()
 
             # Verify existing documents were checked and deleted
             mock_vector_db.get_document_chunks.assert_called()
@@ -116,6 +146,8 @@ class TestDocumentStore:
             assert len(stored_chunks) == 2
             assert all(chunk['chunk_index'] in [0, 1] for chunk in stored_chunks)
             assert all(chunk['total_chunks'] == 2 for chunk in stored_chunks)
+            assert all(chunk['classification'] == 'policies_procedures' for chunk in stored_chunks)
+            assert all('toc' in chunk for chunk in stored_chunks)
 
             # Verify embeddings were generated once
             mock_embedding_generator.generate_embeddings.assert_called_once()
@@ -126,6 +158,8 @@ class TestDocumentStore:
             assert len(added_docs) == 2
             assert added_docs[0]['text'] == 'Test section 1'
             assert added_docs[1]['text'] == 'Test section 2'
+            assert all('classification' in doc for doc in added_docs)
+            assert all('toc' in doc for doc in added_docs)
 
         finally:
             # Clean up
@@ -149,6 +183,8 @@ class TestDocumentStore:
                 assert state is not None
                 assert state.status == 'error'
                 assert state.error == "Processing failed"
+                assert state.classification is None
+                assert state.toc is None
 
         finally:
             if os.path.exists(test_pdf):
@@ -162,13 +198,17 @@ class TestDocumentStore:
                 'source_name': 'test1.pdf',
                 'title': 'Test Document 1',
                 'chunk_count': 5,
-                'total_chunks': 5
+                'total_chunks': 5,
+                'classification': 'policies_procedures',
+                'toc': [{'text': 'Test Document 1', 'level': 1, 'children': []}]
             },
             {
                 'source_name': 'test2.pdf',
                 'title': 'Test Document 2',
                 'chunk_count': 3,
-                'total_chunks': 3
+                'total_chunks': 3,
+                'classification': 'human_resources',
+                'toc': [{'text': 'Test Document 2', 'level': 1, 'children': []}]
             }
         ]
 
@@ -185,9 +225,11 @@ class TestDocumentStore:
             assert len(documents) == 2
             assert documents[0]['source_name'] == 'test1.pdf'
             assert documents[1]['source_name'] == 'test2.pdf'
+            assert all('classification' in doc for doc in documents)
+            assert all('toc' in doc for doc in documents)
 
 class TestDocumentProcessor:
-    def test_process_document(self):
+    def test_process_document(self, mock_document_analyzer):
         """Test document processing."""
         processor = DocumentProcessor()
 
@@ -205,7 +247,9 @@ class TestDocumentProcessor:
                     'file_type': 'pdf',
                     'section_type': 'content',
                     'chunk_index': 0,
-                    'total_chunks': 2
+                    'total_chunks': 2,
+                    'classification': 'policies_procedures',
+                    'toc': [{'text': 'Test Document', 'level': 1, 'children': []}]
                 }
             },
             {
@@ -216,7 +260,9 @@ class TestDocumentProcessor:
                     'file_type': 'pdf',
                     'section_type': 'content',
                     'chunk_index': 1,
-                    'total_chunks': 2
+                    'total_chunks': 2,
+                    'classification': 'policies_procedures',
+                    'toc': [{'text': 'Test Document', 'level': 1, 'children': []}]
                 }
             }
         ]
@@ -224,6 +270,9 @@ class TestDocumentProcessor:
         try:
             with patch.object(processor, '_extract_pdf_text', return_value=mock_sections):
                 chunks = processor.process_document(test_pdf)
+
+            # Verify document analysis was called
+            mock_document_analyzer.analyze_document.assert_called_once()
 
             # Verify chunks were created
             assert len(chunks) == 2
@@ -240,13 +289,16 @@ class TestDocumentProcessor:
                 assert chunk.metadata['title'] == 'Test Document'
                 assert chunk.metadata['file_type'] == 'pdf'
                 assert chunk.metadata['section_type'] == 'content'
+                assert chunk.metadata['classification'] == 'policies_procedures'
+                assert 'toc' in chunk.metadata
+                assert len(chunk.metadata['toc']) == 1
 
         finally:
             # Clean up
             if os.path.exists(test_pdf):
                 os.remove(test_pdf)
 
-    def test_chunk_consistency_error(self, mock_extract_text):
+    def test_chunk_consistency_error(self, mock_extract_text, mock_document_analyzer):
         """Test error handling for inconsistent chunks."""
         # Create mock embeddings with wrong total_chunks
         mock_embeddings = np.array([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]])
@@ -266,7 +318,9 @@ class TestDocumentProcessor:
                     'file_type': 'pdf',
                     'section_type': 'content',
                     'chunk_index': 0,
-                    'total_chunks': 3  # Wrong total
+                    'total_chunks': 3,  # Wrong total
+                    'classification': 'policies_procedures',
+                    'toc': [{'text': 'Test Document', 'level': 1, 'children': []}]
                 }
             },
             {
@@ -277,7 +331,9 @@ class TestDocumentProcessor:
                     'file_type': 'pdf',
                     'section_type': 'content',
                     'chunk_index': 1,
-                    'total_chunks': 3  # Wrong total
+                    'total_chunks': 3,  # Wrong total
+                    'classification': 'policies_procedures',
+                    'toc': [{'text': 'Test Document', 'level': 1, 'children': []}]
                 }
             }
         ]

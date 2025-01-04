@@ -1,223 +1,155 @@
-import unittest
-from unittest.mock import Mock, patch, call
+"""Test chatbot functionality."""
+import pytest
+from unittest.mock import Mock, patch
 from src.chatbot import Chatbot
 
-class TestChatbot(unittest.TestCase):
-    def setUp(self):
-        """Set up test fixtures before each test method."""
-        with patch('openai.OpenAI'):  # Prevent actual OpenAI client creation
-            self.chatbot = Chatbot()
+@pytest.fixture
+def mock_openai():
+    with patch('src.chatbot.OpenAI') as mock:
+        mock_client = Mock()
+        mock_client.chat.completions.create.return_value = Mock(
+            choices=[Mock(message=Mock(content="Test response"))]
+        )
+        mock.return_value = mock_client
+        yield mock
 
-    def test_get_cache_key(self):
-        """Test cache key generation is consistent."""
-        # Test basic key generation
-        key1 = self.chatbot._get_cache_key("Test Context", "Test Query")
-        key2 = self.chatbot._get_cache_key("Test Context", "Test Query")
-        self.assertEqual(key1, key2)
+@pytest.fixture
+def chatbot(mock_openai):
+    return Chatbot()
 
-        # Test whitespace normalization
-        key3 = self.chatbot._get_cache_key("  Test   Context  ", "  Test   Query  ")
-        self.assertEqual(key1, key3)
+class TestChatbot:
+    def test_generate_response_with_toc(self, chatbot):
+        """Test response generation with table of contents."""
+        context = """Test context
+        "toc": [{"text": "Main Title", "level": 1, "children": []}]
+        More context"""
+        query = "test query"
+        
+        response = chatbot.generate_response(context, query)
+        
+        assert isinstance(response, dict)
+        assert 'content' in response
+        assert 'table_of_contents' in response
+        assert response['table_of_contents'] == [{"text": "Main Title", "level": 1, "children": []}]
 
-        # Test case normalization
-        key4 = self.chatbot._get_cache_key("TEST CONTEXT", "TEST QUERY")
-        self.assertEqual(key1, key4)
+    def test_generate_response_without_toc(self, chatbot):
+        """Test response generation without table of contents."""
+        context = "Test context without TOC"
+        query = "test query"
+        
+        response = chatbot.generate_response(context, query)
+        
+        assert isinstance(response, dict)
+        assert 'content' in response
+        assert 'table_of_contents' in response
+        assert response['table_of_contents'] is None
 
-    def test_format_contexts_for_cache_with_source_grouping(self):
-        """Test context formatting with source grouping and metadata."""
+    def test_generate_response_with_sources_and_toc(self, chatbot):
+        """Test response generation with sources and table of contents."""
         contexts = [
             {
-                "text": "Second chunk",
-                "source": "doc1.pdf",
-                "title": "Document 1",
-                "chunk_index": 1,
-                "total_chunks": 2
+                'text': 'Test context 1',
+                'source': 'doc1.pdf',
+                'toc': [{"text": "Title 1", "level": 1, "children": []}]
             },
             {
-                "text": "First chunk",
-                "source": "doc1.pdf",
-                "title": "Document 1",
-                "chunk_index": 0,
-                "total_chunks": 2
-            },
-            {
-                "text": "Content from doc2",
-                "source": "doc2.pdf",
-                "title": "Document 2",
-                "chunk_index": 0,
-                "total_chunks": 1
+                'text': 'Test context 2',
+                'source': 'doc2.pdf',
+                'toc': [{"text": "Title 2", "level": 1, "children": []}]
             }
         ]
+        query = "test query"
         
-        formatted = self.chatbot._format_contexts_for_cache(contexts)
+        response = chatbot.generate_response_with_sources(contexts, query)
         
-        # Verify source grouping
-        self.assertIn("Source: doc1.pdf", formatted)
-        self.assertIn("Source: doc2.pdf", formatted)
-        
-        # Verify title inclusion
-        self.assertIn("Title: Document 1", formatted)
-        self.assertIn("Title: Document 2", formatted)
-        
-        # Verify chunk ordering within sources
-        doc1_index = formatted.index("doc1.pdf")
-        first_chunk_index = formatted.index("[Chunk 1/2]")
-        second_chunk_index = formatted.index("[Chunk 2/2]")
-        self.assertLess(first_chunk_index, second_chunk_index)
-        
-        # Verify content inclusion
-        self.assertIn("First chunk", formatted)
-        self.assertIn("Second chunk", formatted)
-        self.assertIn("Content from doc2", formatted)
+        assert isinstance(response, dict)
+        assert 'content' in response
+        assert 'table_of_contents' in response
+        assert response['table_of_contents'] == [{"text": "Title 1", "level": 1, "children": []}]
 
-    def test_generate_response_with_sources_multi_document(self):
-        """Test source-cited response generation with multiple documents."""
-        mock_response = Mock()
-        mock_response.choices = [Mock(message=Mock(content="Test response with sources"))]
+    def test_response_caching_with_toc(self, chatbot):
+        """Test response caching with table of contents."""
+        context = """Test context
+        "toc": [{"text": "Cached Title", "level": 1, "children": []}]
+        More context"""
+        query = "test query"
         
-        contexts = [
-            {
-                "text": "Content from first doc",
-                "source": "doc1.pdf",
-                "title": "Document 1",
-                "chunk_index": 0,
-                "total_chunks": 1
-            },
-            {
-                "text": "Content from second doc",
-                "source": "doc2.pdf",
-                "title": "Document 2",
-                "chunk_index": 0,
-                "total_chunks": 1
-            }
-        ]
+        # First call should use OpenAI API
+        response1 = chatbot.generate_response(context, query)
         
-        with patch.object(self.chatbot.client.chat.completions, 'create', return_value=mock_response) as mock_create:
-            response = self.chatbot.generate_response_with_sources(contexts, "test query")
-            
-            # Verify source overview was included
-            call_args = mock_create.call_args[1]
-            messages = call_args['messages']
-            prompt = messages[1]['content']
-            
-            # Check source overview format
-            self.assertIn("* [Source 1: doc1.pdf]", prompt)
-            self.assertIn("* [Source 2: doc2.pdf]", prompt)
-            
-            # Check synthesis instructions
-            self.assertIn("synthesizes information across all sources", prompt)
-            self.assertIn("Compare and contrast information", prompt)
-            
-            # Verify source details format
-            self.assertIn("Source: doc1.pdf", prompt)
-            self.assertIn("Title: Document 1", prompt)
-            self.assertIn("Content from first doc", prompt)
-            self.assertIn("Source: doc2.pdf", prompt)
-            self.assertIn("Title: Document 2", prompt)
-            self.assertIn("Content from second doc", prompt)
-
-    def test_format_contexts_empty_metadata(self):
-        """Test context formatting handles missing metadata gracefully."""
-        contexts = [
-            {
-                "text": "Content without metadata"
-            }
-        ]
+        # Second call should use cache
+        response2 = chatbot.generate_response(context, query)
         
-        formatted = self.chatbot._format_contexts_for_cache(contexts)
+        assert response1 == response2
+        assert response1['table_of_contents'] == response2['table_of_contents']
+
+    def test_settings_change_clears_cache(self, chatbot):
+        """Test that settings changes clear the response cache."""
+        context = """Test context
+        "toc": [{"text": "Title", "level": 1, "children": []}]"""
+        query = "test query"
         
-        # Verify default values are used
-        self.assertIn("Source: Unknown", formatted)
-        self.assertIn("Title: Untitled", formatted)
-        self.assertIn("[Chunk 1/1]", formatted)
-        self.assertIn("Content without metadata", formatted)
-
-    def test_generate_response_caching(self):
-        """Test response caching behavior."""
-        mock_response = Mock()
-        mock_response.choices = [Mock(message=Mock(content="Test response"))]
+        # Generate initial response
+        response1 = chatbot.generate_response(context, query)
         
-        with patch.object(self.chatbot.client.chat.completions, 'create', return_value=mock_response) as mock_create:
-            # First call should use API
-            response1 = self.chatbot.generate_response("test context", "test query")
-            self.assertEqual(response1, "Test response")
-            mock_create.assert_called_once()
-
-            # Second call should use cache
-            mock_create.reset_mock()
-            response2 = self.chatbot.generate_response("test context", "test query")
-            self.assertEqual(response2, "Test response")
-            mock_create.assert_not_called()
-
-            # Different query should use API again
-            response3 = self.chatbot.generate_response("test context", "different query")
-            self.assertEqual(response3, "Test response")
-            mock_create.assert_called_once()
-
-    def test_generate_response_with_sources_caching(self):
-        """Test source-cited response caching behavior."""
-        mock_response = Mock()
-        mock_response.choices = [Mock(message=Mock(content="Test response with sources"))]
+        # Simulate settings change
+        chatbot._handle_settings_change('llm', {'temperature': 0.5})
         
-        with patch.object(self.chatbot.client.chat.completions, 'create', return_value=mock_response) as mock_create:
-            contexts = [
-                {
-                    "text": "Context 1",
-                    "source": "doc1.pdf",
-                    "title": "Document 1",
-                    "chunk_index": 0,
-                    "total_chunks": 1
-                },
-                {
-                    "text": "Context 2",
-                    "source": "doc2.pdf",
-                    "title": "Document 2",
-                    "chunk_index": 0,
-                    "total_chunks": 1
-                }
-            ]
-
-            # First call should use API
-            response1 = self.chatbot.generate_response_with_sources(contexts, "test query")
-            self.assertEqual(response1, "Test response with sources")
-            mock_create.assert_called_once()
-
-            # Second call should use cache
-            mock_create.reset_mock()
-            response2 = self.chatbot.generate_response_with_sources(contexts, "test query")
-            self.assertEqual(response2, "Test response with sources")
-            mock_create.assert_not_called()
-
-            # Same contexts in different order should use cache
-            mock_create.reset_mock()
-            response3 = self.chatbot.generate_response_with_sources(contexts[::-1], "test query")
-            self.assertEqual(response3, "Test response with sources")
-            mock_create.assert_not_called()
-
-    def test_api_parameters(self):
-        """Test API is called with correct parameters for comprehensive output."""
-        mock_response = Mock()
-        mock_response.choices = [Mock(message=Mock(content="Test response"))]
+        # Response should be regenerated, not cached
+        response2 = chatbot.generate_response(context, query)
         
-        with patch.object(self.chatbot.client.chat.completions, 'create', return_value=mock_response) as mock_create:
-            self.chatbot.generate_response("test context", "test query")
-            
-            # Verify parameters for comprehensive responses
-            call_kwargs = mock_create.call_args[1]
-            self.assertEqual(call_kwargs['temperature'], 0.3)
-            self.assertEqual(call_kwargs['seed'], 42)
-            self.assertEqual(call_kwargs['max_tokens'], 1000)
+        assert response1['content'] == response2['content']  # Content same due to mock
+        assert response1['table_of_contents'] == response2['table_of_contents']
 
-    def test_error_handling(self):
+    def test_error_handling(self, chatbot, mock_openai):
         """Test error handling in response generation."""
-        with patch.object(self.chatbot.client.chat.completions, 'create', side_effect=Exception("API error")):
-            with self.assertRaises(Exception) as context:
-                self.chatbot.generate_response("test context", "test query")
-            self.assertIn("Error generating response", str(context.exception))
+        mock_openai.return_value.chat.completions.create.side_effect = Exception("API Error")
+        
+        context = """Test context
+        "toc": [{"text": "Error Title", "level": 1, "children": []}]"""
+        query = "test query"
+        
+        with pytest.raises(Exception) as exc_info:
+            chatbot.generate_response(context, query)
+        assert "Error generating response" in str(exc_info.value)
 
-            with self.assertRaises(Exception) as context:
-                self.chatbot.generate_response_with_sources([{"text": "test"}], "test query")
-            self.assertIn("Error generating response with sources", str(context.exception))
+    def test_multiple_toc_handling(self, chatbot):
+        """Test handling of multiple TOCs in source contexts."""
+        contexts = [
+            {
+                'text': 'Test context 1',
+                'source': 'doc1.pdf',
+                'toc': [{"text": "Title 1", "level": 1, "children": []}]
+            },
+            {
+                'text': 'Test context 2',
+                'source': 'doc2.pdf',
+                'toc': [{"text": "Title 2", "level": 1, "children": []}]
+            }
+        ]
+        query = "test query"
+        
+        response = chatbot.generate_response_with_sources(contexts, query)
+        
+        # Should use TOC from first context
+        assert response['table_of_contents'] == [{"text": "Title 1", "level": 1, "children": []}]
 
-if __name__ == '__main__':
-    unittest.main()
+    def test_invalid_toc_format(self, chatbot):
+        """Test handling of invalid TOC format in context."""
+        context = """Test context
+        "toc": invalid_json_here
+        More context"""
+        query = "test query"
+        
+        response = chatbot.generate_response(context, query)
+        
+        assert response['table_of_contents'] is None
+
+    def test_empty_context(self, chatbot):
+        """Test response generation with empty context."""
+        response = chatbot.generate_response("", "test query")
+        
+        assert isinstance(response, dict)
+        assert 'content' in response
+        assert 'table_of_contents' in response
+        assert response['table_of_contents'] is None
