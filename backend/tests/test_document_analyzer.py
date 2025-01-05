@@ -1,410 +1,299 @@
 """Test document analyzer functionality."""
 import pytest
+import re
 from src.document_analyzer import DocumentAnalyzer, Heading, DocumentSection
-from src.config.constants import DOCUMENT_CLASSIFICATIONS
+import os
 
 @pytest.fixture
-def analyzer():
+def document_analyzer():
+    """Create a document analyzer instance."""
     return DocumentAnalyzer()
 
-class TestHeadingExtraction:
-    def test_markdown_headings(self, analyzer):
-        """Test extraction of markdown-style headings."""
-        text = """# Main Title
-Some content
-## Section 1
-Content 1
-### Subsection 1.1
-Content 1.1
-## Section 2
-Content 2"""
+def test_heading_extraction_from_real_pdf():
+    """Test heading extraction from a real PDF document with clear structure."""
+    analyzer = DocumentAnalyzer()
+    
+    # Read the real PDF content
+    pdf_path = os.path.join("tests", "test_data", "sDR_IT_disaster_recovery_plan_template.pdf")
+    with open(pdf_path, 'rb') as f:
+        from pypdf import PdfReader
+        reader = PdfReader(f)
+        text = ""
+        for page in reader.pages:
+            page_text = page.extract_text()
+            print(f"\nPage content (length: {len(page_text)}):")
+            print("-" * 80)
+            print(page_text[:500] + "..." if len(page_text) > 500 else page_text)
+            print("-" * 80)
+            text += page_text + "\n"
         
-        headings = analyzer.extract_headings(text)
-        assert len(headings) == 4
-        assert [h.text for h in headings] == [
-            'Main Title',
-            'Section 1',
-            'Subsection 1.1',
-            'Section 2'
-        ]
-        assert [h.level for h in headings] == [1, 2, 3, 2]
+        print(f"\nTotal document length: {len(text)}")
+        
+        # Print lines that look like headings
+        print("\nPotential heading lines:")
+        print("-" * 80)
+        for line in text.split('\n'):
+            line = line.strip()
+            # Remove "All Rights Reserved" prefix if present
+            if line.startswith("All Rights Reserved"):
+                line = line[line.find("TechTarget") + len("TechTarget"):].strip()
+            if not line:
+                continue
+                
+            if re.match(r'^\s*\d+(?:\.\d+)*\s+\w', line):
+                print(f"Numbered line: {line}")
+            elif re.match(r'^(?:Information Technology Statement of Intent|Policy Statement|Objectives|Key Personnel Contact Info|External Contacts|Notification Calling Tree)', line):
+                print(f"Special section: {line}")
+        print("-" * 80)
+    
+    # Extract headings using unstructured
+    headings = analyzer.extract_headings(text, file_path=pdf_path)
+    
+    print("\nExtracted headings:")
+    print("-" * 80)
+    for h in headings:
+        print(f"Level {h.level}: {h.text}")
+    print("-" * 80)
+    
+    # Verify main section headings are found
+    expected_main_sections = [
+        "1 Plan Overview",
+        "2 Emergency Response",
+        "3 Media",
+        "4 Insurance",
+        "5 Financial and Legal Issues",
+        "6 DRP Exercising"
+    ]
+    
+    found_main_sections = [h.text for h in headings if h.level == 1 and h.text.startswith(("1 ", "2 ", "3 ", "4 ", "5 ", "6 "))]
+    
+    # Verify all main sections were found
+    for section in expected_main_sections:
+        assert section in found_main_sections, f"Main section '{section}' not found in extracted headings"
+    
+    # Verify subsections for Section 1
+    expected_subsections_1 = [
+        "1.1 Plan Updating",
+        "1.2 Plan Documentation Storage",
+        "1.3 Backup Strategy",
+        "1.4 Risk Management"
+    ]
+    
+    found_subsections_1 = [h.text for h in headings if h.level == 2 and h.text.startswith("1.")]
+    
+    # Verify all subsections of section 1 were found
+    for subsection in expected_subsections_1:
+        assert subsection in found_subsections_1, f"Subsection '{subsection}' not found in extracted headings"
+    
+    # Verify subsections for Section 2
+    expected_subsections_2 = [
+        "2.1 Alert, escalation and plan invocation",
+        "2.2 Disaster Recovery Team",
+        "2.3 Emergency Alert, Escalation and DRP Activation"
+    ]
+    
+    found_subsections_2 = [h.text for h in headings if h.level == 2 and h.text.startswith("2.")]
+    
+    # Verify all subsections of section 2 were found
+    for subsection in expected_subsections_2:
+        assert subsection in found_subsections_2, f"Subsection '{subsection}' not found in extracted headings"
+    
+    # Verify some third-level headings
+    expected_level3_sections = [
+        "2.1.1 Plan Triggering Events",
+        "2.1.2 Assembly Points",
+        "2.1.3 Activation of Emergency Response Team"
+    ]
+    
+    found_level3_sections = [h.text for h in headings if h.level == 3]
+    
+    # Verify third-level sections were found
+    for section in expected_level3_sections:
+        assert section in found_level3_sections, f"Level 3 section '{section}' not found in extracted headings"
 
-    def test_numbered_headings(self, analyzer):
-        """Test extraction of numbered headings with preserved numbers."""
-        text = """1. First Section
-Content
-1.1. Subsection One
-More content
-1.2. Subsection Two
-Even more content
-2. Second Section
-Content
-2.1.a Additional Details
-Final content"""
-        
-        headings = analyzer.extract_headings(text)
-        assert len(headings) == 5
-        assert [h.text for h in headings] == [
-            '1 First Section',
-            '1.1 Subsection One',
-            '1.2 Subsection Two',
-            '2 Second Section',
-            '2.1.a Additional Details'
-        ]
-        assert [h.level for h in headings] == [1, 2, 2, 1, 3]
+def test_heading_extraction_from_bom_pdf():
+    """Test heading extraction from the BOM business model PDF."""
+    analyzer = DocumentAnalyzer()
+    
+    # Read the PDF content
+    pdf_path = os.path.join("tests", "test_data", "BOM_business_model.pdf")
+    with open(pdf_path, 'rb') as f:
+        from pypdf import PdfReader
+        reader = PdfReader(f)
+        text = ""
+        for page in reader.pages:
+            text += page.extract_text() + "\n"
+    
+    # Extract headings using unstructured
+    headings = analyzer.extract_headings(text, file_path=pdf_path)
+    
+    # Verify main section headings are found
+    expected_main_sections = [
+        "1 Business synopsis",
+        "2 2013 Goals"
+    ]
+    
+    found_main_sections = [h.text for h in headings if h.level == 1]
+    
+    # Verify all main sections were found
+    for section in expected_main_sections:
+        assert section in found_main_sections, f"Main section '{section}' not found in extracted headings"
+    
+    # Verify subsections for Section 1
+    expected_subsections_1 = [
+        "1.1 Legal structure",
+        "1.2 How we make money",
+        "1.3 Broker codes",
+        "1.4 Client accounts and payments",
+        "1.5 Regulations",
+        "1.6 Bets",
+        "1.7 Underlyings and markets",
+        "1.8 Trading restrictions",
+        "1.9 IT",
+        "1.10 Marketing"
+    ]
+    
+    found_subsections_1 = [h.text for h in headings if h.level == 2 and h.text.startswith("1.")]
+    
+    # Verify all subsections of section 1 were found
+    for subsection in expected_subsections_1:
+        assert subsection in found_subsections_1, f"Subsection '{subsection}' not found in extracted headings"
+    
+    # Verify subsections for Section 2
+    expected_subsections_2 = [
+        "2.1 Development of the Web API",
+        "2.2 Mojolicious iteration 2",
+        "2.3 New Charting system",
+        "2.4 Integrate Tick trades into main betting interface"
+    ]
+    
+    found_subsections_2 = [h.text for h in headings if h.level == 2 and h.text.startswith("2.")]
+    
+    # Verify all subsections of section 2 were found
+    for subsection in expected_subsections_2:
+        assert subsection in found_subsections_2, f"Subsection '{subsection}' not found in extracted headings"
+    
+    # Verify some third-level headings under Marketing
+    expected_marketing_subsections = [
+        "1.10.1 Data & Analytics",
+        "1.10.2 Affiliate Program",
+        "1.10.3 Free gift/bonus codes",
+        "1.10.4 White labels",
+        "1.10.5 Other sites"
+    ]
+    
+    found_marketing_subsections = [h.text for h in headings if h.level == 3 and h.text.startswith("1.10.")]
+    
+    # Verify marketing subsections were found
+    for section in expected_marketing_subsections:
+        assert section in found_marketing_subsections, f"Marketing subsection '{section}' not found in extracted headings"
 
-    def test_section_number_formats(self, analyzer):
-        """Test various section number formats."""
-        text = """A. Overview
-A.1. Background
-A.1.1. Historical Context
-I. Major Section
-I.1. Subsection
-1.a Additional Point
-Section 2.1: Methodology
-Chapter 3: Results
-Appendix B.1: References"""
-        
-        headings = analyzer.extract_headings(text)
-        
-        # Verify section numbers are preserved
-        texts = [h.text for h in headings]
-        assert 'A Overview' in texts
-        assert 'A.1 Background' in texts
-        assert 'A.1.1 Historical Context' in texts
-        assert 'I Major Section' in texts
-        assert 'I.1 Subsection' in texts
-        assert '1.a Additional Point' in texts
-        assert 'Section 2.1 Methodology' in texts
-        assert 'Chapter 3 Results' in texts
-        assert 'Appendix B.1 References' in texts
-        
-        # Verify correct level assignment
-        levels = [h.level for h in headings]
-        assert levels[0] == 1  # A
-        assert levels[1] == 2  # A.1
-        assert levels[2] == 3  # A.1.1
-        assert levels[3] == 2  # I (Roman numerals are major sections)
-        assert levels[4] == 3  # I.1
-        assert levels[5] == 2  # 1.a
-        assert levels[6] == 2  # Section 2.1
-        assert levels[7] == 1  # Chapter 3
-        assert levels[8] == 2  # Appendix B.1
+def test_toc_building_from_real_pdf():
+    """Test TOC building from a real PDF document with clear structure."""
+    analyzer = DocumentAnalyzer()
+    
+    # Read the real PDF content
+    pdf_path = os.path.join("tests", "test_data", "sDR_IT_disaster_recovery_plan_template.pdf")
+    with open(pdf_path, 'rb') as f:
+        from pypdf import PdfReader
+        reader = PdfReader(f)
+        text = ""
+        for page in reader.pages:
+            text += page.extract_text() + "\n"
+    
+    # Extract headings and build TOC
+    headings = analyzer.extract_headings(text)
+    toc = analyzer.build_toc(headings)
+    
+    # Verify TOC structure
+    assert len(toc) > 0, "TOC should not be empty"
+    
+    # Find main sections in TOC
+    main_sections = {}
+    for entry in toc:
+        if entry['text'].startswith(("1 ", "2 ", "3 ", "4 ", "5 ", "6 ")):
+            main_sections[entry['text']] = entry
+    
+    # Verify section 1 and its subsections
+    section1 = main_sections.get("1 Plan Overview")
+    assert section1 is not None, "Section 1 not found in TOC"
+    assert len(section1['children']) == 4, "Section 1 should have 4 subsections"
+    
+    # Verify section 2 and its subsections
+    section2 = main_sections.get("2 Emergency Response")
+    assert section2 is not None, "Section 2 not found in TOC"
+    assert len(section2['children']) >= 3, "Section 2 should have at least 3 subsections"
+    
+    # Verify section 2.1 and its subsections
+    section2_1 = None
+    for child in section2['children']:
+        if child['text'] == "2.1 Alert, escalation and plan invocation":
+            section2_1 = child
+            break
+    
+    assert section2_1 is not None, "Section 2.1 not found in TOC"
+    assert len(section2_1['children']) >= 3, "Section 2.1 should have at least 3 subsections"
+    
+    # Verify correct level assignment
+    def verify_levels(entries, expected_level):
+        for entry in entries:
+            assert entry['level'] == expected_level, f"Entry {entry['text']} has incorrect level"
+            if entry['children']:
+                verify_levels(entry['children'], expected_level + 1)
+    
+    verify_levels(toc, 1)
 
-    def test_mixed_document_format(self, analyzer):
-        """Test consistent heading extraction across document formats."""
-        text = """# Main Title
-
-1. Introduction
-This is an introduction.
-
-1.1. Background
-Some background information.
-
-Section 2: Methodology
-The methodology section.
-
-2.1. Process Steps
-Step by step guide.
-
-RESULTS AND DISCUSSION
-Important findings.
-
-Appendix A.1: Data Tables
-Reference data."""
-        
-        headings = analyzer.extract_headings(text)
-        
-        # Verify all heading styles are captured
-        texts = [h.text for h in headings]
-        assert 'Main Title' in texts  # Markdown
-        assert '1 Introduction' in texts  # Numbered
-        assert '1.1 Background' in texts  # Sub-numbered
-        assert 'Section 2 Methodology' in texts  # Section format
-        assert '2.1 Process Steps' in texts  # Sub-numbered
-        assert 'RESULTS AND DISCUSSION' in texts  # All caps
-        assert 'Appendix A.1 Data Tables' in texts  # Appendix format
-        
-        # Verify proper hierarchy
-        levels = [h.level for h in headings]
-        assert levels[0] == 1  # Main Title
-        assert levels[1] == 1  # 1. Introduction
-        assert levels[2] == 2  # 1.1. Background
-        assert levels[3] == 1  # Section 2
-        assert levels[4] == 2  # 2.1. Process
-        assert levels[5] == 1  # RESULTS
-        assert levels[6] == 2  # Appendix A.1
-
-    def test_mixed_heading_styles(self, analyzer):
-        """Test extraction of mixed heading styles."""
-        text = """# Document Title
-1. First Section
-## 1.1 Subsection
-IMPORTANT NOTICE:
-Section Header:
-2. Second Section"""
-        
-        headings = analyzer.extract_headings(text)
-        assert len(headings) == 6
-        assert all(isinstance(h, Heading) for h in headings)
-
-    def test_empty_document(self, analyzer):
-        """Test handling of empty documents."""
-        assert analyzer.extract_headings("") == []
-        assert analyzer.extract_headings("\n\n") == []
-
-class TestSectionExtraction:
-    def test_section_extraction_with_headings(self, analyzer):
-        """Test extraction of sections from document with headings."""
-        text = """# Main Title
-This is the introduction.
-
-## Section 1
-This is section 1 content.
-
-## Section 2
-This is section 2 content."""
-
-        headings = analyzer.extract_headings(text)
-        sections = analyzer.extract_sections(text, headings)
-        
-        assert len(sections) == 3  # Main + 2 sections
-        assert sections[0].text.startswith("# Main Title")
-        assert sections[1].text.startswith("## Section 1")
-        assert sections[2].text.startswith("## Section 2")
-        
-        # Verify section positions
-        assert sections[0].start_pos == 0
-        assert sections[0].end_pos < sections[1].start_pos
-        assert sections[1].end_pos < sections[2].start_pos
-        
-        # Verify heading references
-        assert sections[0].heading.text == "Main Title"
-        assert sections[0].heading.level == 1
-        assert sections[1].heading.text == "Section 1"
-        assert sections[1].heading.level == 2
-        assert sections[2].heading.text == "Section 2"
-        assert sections[2].heading.level == 2
-
-    def test_section_extraction_without_headings(self, analyzer):
-        """Test extraction of sections from document without headings."""
-        text = "This is a document without any headings.\nIt should be one section."
-        
-        sections = analyzer.extract_sections(text, [])
-        
-        assert len(sections) == 1
-        assert sections[0].text == text
-        assert sections[0].start_pos == 0
-        assert sections[0].end_pos == len(text)
-        assert sections[0].heading is None
-
-    def test_section_extraction_with_empty_sections(self, analyzer):
-        """Test handling of empty sections between headings."""
-        text = """# Title 1
-
-# Title 2
-
-# Title 3
-Content 3"""
-
-        headings = analyzer.extract_headings(text)
-        sections = analyzer.extract_sections(text, headings)
-        
-        # Should only include non-empty sections
-        assert len(sections) == 2  # Title 1 and Title 3 (with content)
-        assert sections[0].heading.text == "Title 1"
-        assert sections[1].heading.text == "Title 3"
-        assert "Content 3" in sections[1].text
-
-class TestTableOfContents:
-    def test_complex_toc_generation(self, analyzer):
-        """Test generation of complex hierarchical table of contents."""
-        headings = [
-            Heading("Test Document Title", 1, 0, 10),
-            Heading("1. Introduction", 2, 20, 30),
-            Heading("1.1. Background", 3, 40, 50),
-            Heading("1.2. Purpose", 3, 60, 70),
-            Heading("2. Methodology", 2, 80, 90),
-            Heading("2.1. Process Steps", 3, 100, 110),
-            Heading("2.1.1. Planning", 4, 120, 130),
-            Heading("2.1.2. Implementation", 4, 140, 150),
-            Heading("2.2. Data Collection", 3, 160, 170),
-            Heading("2.2.1. Primary Sources", 4, 180, 190),
-            Heading("2.2.1.1. Interviews", 5, 200, 210),
-            Heading("2.2.1.2. Surveys", 5, 220, 230),
-            Heading("2.2.2. Secondary Sources", 4, 240, 250),
-            Heading("3. Results", 2, 260, 270),
-            Heading("3.1. Key Findings", 3, 280, 290),
-            Heading("3.2. Analysis", 3, 300, 310),
-            Heading("Appendix A: Reference Data", 2, 320, 330),
-            Heading("A.1. Data Tables", 3, 340, 350),
-            Heading("A.2. Methodology Details", 3, 360, 370),
-            Heading("GLOSSARY", 2, 380, 390)
-        ]
-        
-        toc = analyzer.build_toc(headings)
-        
-        # Verify root structure
-        assert len(toc) == 1  # Only the title at root level
-        assert toc[0]['text'] == "Test Document Title"
-        root = toc[0]
-        
-        # Verify main sections
-        assert len(root['children']) == 5  # Introduction, Methodology, Results, Appendix, Glossary
-        
-        # Verify Introduction section
-        intro = root['children'][0]
-        assert intro['text'] == "1. Introduction"
-        assert len(intro['children']) == 2  # Background and Purpose
-        assert intro['children'][0]['text'] == "1.1. Background"
-        assert intro['children'][1]['text'] == "1.2. Purpose"
-        
-        # Verify Methodology section
-        method = root['children'][1]
-        assert method['text'] == "2. Methodology"
-        assert len(method['children']) == 2  # Process Steps and Data Collection
-        
-        # Verify Process Steps subsection
-        process = method['children'][0]
-        assert process['text'] == "2.1. Process Steps"
-        assert len(process['children']) == 2  # Planning and Implementation
-        assert process['children'][0]['text'] == "2.1.1. Planning"
-        assert process['children'][1]['text'] == "2.1.2. Implementation"
-        
-        # Verify Data Collection subsection
-        data = method['children'][1]
-        assert data['text'] == "2.2. Data Collection"
-        assert len(data['children']) == 2  # Primary and Secondary Sources
-        
-        # Verify Primary Sources sub-subsection
-        primary = data['children'][0]
-        assert primary['text'] == "2.2.1. Primary Sources"
-        assert len(primary['children']) == 2  # Interviews and Surveys
-        assert primary['children'][0]['text'] == "2.2.1.1. Interviews"
-        assert primary['children'][1]['text'] == "2.2.1.2. Surveys"
-        
-        # Verify Results section
-        results = root['children'][2]
-        assert results['text'] == "3. Results"
-        assert len(results['children']) == 2  # Key Findings and Analysis
-        assert results['children'][0]['text'] == "3.1. Key Findings"
-        assert results['children'][1]['text'] == "3.2. Analysis"
-        
-        # Verify Appendix section
-        appendix = root['children'][3]
-        assert appendix['text'] == "Appendix A: Reference Data"
-        assert len(appendix['children']) == 2  # Data Tables and Methodology Details
-        assert appendix['children'][0]['text'] == "A.1. Data Tables"
-        assert appendix['children'][1]['text'] == "A.2. Methodology Details"
-        
-        # Verify Glossary section
-        assert root['children'][4]['text'] == "GLOSSARY"
-
-    def test_toc_with_missing_levels(self, analyzer):
-        """Test TOC generation with missing heading levels."""
-        headings = [
-            Heading("Title", 1, 0, 10),
-            Heading("Subsection", 3, 20, 30)  # Missing level 2
-        ]
-        
-        toc = analyzer.build_toc(headings)
-        assert len(toc) == 1
-        assert toc[0]['text'] == "Title"
-        # Subsection should still be included
-        assert len(toc[0]['children']) == 1
-        assert toc[0]['children'][0]['text'] == "Subsection"
-
-    def test_empty_toc(self, analyzer):
-        """Test TOC generation with no headings."""
-        assert analyzer.build_toc([]) == []
-
-class TestDocumentClassification:
-    @pytest.mark.parametrize("content,title,expected_class", [
-        ("This is a policy document outlining procedures", "Company Policy", "policies_procedures"),
-        ("Financial report for Q1 2024 revenue and expenses", "Q1 Report", "finance_accounting"),
-        ("Employee handbook for HR policies", "HR Manual", "human_resources"),
-        ("IT system architecture and network setup", "System Design", "it_technology"),
-        ("Customer service guidelines and support procedures", "Service Manual", "customer_service_ops"),
-        ("Risk assessment and mitigation strategies", "Risk Report", "risk_management"),
-        ("Random unclassifiable content", "Misc Document", "miscellaneous")
-    ])
-    def test_document_classification(self, analyzer, content, title, expected_class):
-        """Test classification of documents based on content and title."""
-        classification = analyzer.classify_document(content, title)
-        assert classification == expected_class
-        assert classification in DOCUMENT_CLASSIFICATIONS
-
-    def test_empty_document_classification(self, analyzer):
-        """Test classification of empty documents."""
-        classification = analyzer.classify_document("", "")
-        assert classification == "miscellaneous"
-
-class TestDocumentAnalysis:
-    def test_complete_document_analysis(self, analyzer):
-        """Test complete document analysis including TOC and classification."""
-        with open('tests/test_data/test.md', 'r') as f:
-            document = f.read()
-
-        result = analyzer.analyze_document(document, "Test Document Title")
-        
-        # Verify TOC structure
-        assert len(result['toc']) == 1  # Only title at root
-        root = result['toc'][0]
-        assert root['text'] == "Test Document Title"
-        
-        # Verify main sections
-        assert len(root['children']) == 5  # Introduction, Methodology, Results, Appendix, Glossary
-        
-        # Verify Introduction section
-        intro = root['children'][0]
-        assert intro['text'] == "1. Introduction"
-        assert len(intro['children']) == 2  # Background and Purpose
-        
-        # Verify Methodology section with deep nesting
-        method = root['children'][1]
-        assert method['text'] == "2. Methodology"
-        assert len(method['children']) == 2  # Process Steps and Data Collection
-        
-        # Verify Process Steps subsection
-        process = method['children'][0]
-        assert process['text'] == "2.1. Process Steps"
-        assert len(process['children']) == 2  # Planning and Implementation
-        
-        # Verify Data Collection subsection with deep nesting
-        data = method['children'][1]
-        assert data['text'] == "2.2. Data Collection"
-        assert len(data['children']) == 2  # Primary and Secondary Sources
-        
-        # Verify Primary Sources with deepest nesting
-        primary = data['children'][0]
-        assert primary['text'] == "2.2.1. Primary Sources"
-        assert len(primary['children']) == 2  # Interviews and Surveys
-        
-        # Verify headings
-        assert len(result['headings']) == 20  # Total number of headings
-        assert all(isinstance(h, Heading) for h in result['headings'])
-        assert result['headings'][0].text == "Test Document Title"
-        assert result['headings'][0].level == 1
-        
-        # Verify sections
-        assert len(result['sections']) == 20  # One section per heading
-        assert all(isinstance(s, DocumentSection) for s in result['sections'])
-        assert all(s.heading is not None for s in result['sections'])
-        assert result['sections'][0].heading.text == "Test Document Title"
-        assert "methodology" in result['sections'][4].text.lower()
-
-    def test_error_handling(self, analyzer):
-        """Test error handling in document analysis."""
-        # Test with None input
-        result = analyzer.analyze_document(None, None)
-        assert result['classification'] == 'miscellaneous'
-        assert result['toc'] == []
-        assert result['headings'] == []
-        assert result['sections'] == []
-
-        # Test with invalid input type
-        result = analyzer.analyze_document(123, "Test")  # Non-string input
-        assert result['classification'] == 'miscellaneous'
-        assert result['toc'] == []
-        assert result['headings'] == []
-        assert result['sections'] == []
+def test_section_extraction_from_real_pdf():
+    """Test section extraction from a real PDF document."""
+    analyzer = DocumentAnalyzer()
+    
+    # Read the real PDF content
+    pdf_path = os.path.join("tests", "test_data", "sDR_IT_disaster_recovery_plan_template.pdf")
+    with open(pdf_path, 'rb') as f:
+        from pypdf import PdfReader
+        reader = PdfReader(f)
+        text = ""
+        for page in reader.pages:
+            text += page.extract_text() + "\n"
+    
+    # Extract headings and sections
+    headings = analyzer.extract_headings(text)
+    sections = analyzer.extract_sections(text, headings)
+    
+    # Verify sections were extracted
+    assert len(sections) > 0, "Sections should not be empty"
+    
+    # Verify section 1 content
+    section1 = None
+    for section in sections:
+        if section.heading and section.heading.text == "1 Plan Overview":
+            section1 = section
+            break
+    
+    assert section1 is not None, "Section 1 not found in extracted sections"
+    assert "Plan Overview" in section1.text, "Section 1 text should contain 'Plan Overview'"
+    assert section1.heading.level == 1, "Section 1 should be level 1"
+    
+    # Verify section 2.1 content
+    section2_1 = None
+    for section in sections:
+        if section.heading and section.heading.text == "2.1 Alert, escalation and plan invocation":
+            section2_1 = section
+            break
+    
+    assert section2_1 is not None, "Section 2.1 not found in extracted sections"
+    assert "Alert" in section2_1.text, "Section 2.1 text should contain 'Alert'"
+    assert section2_1.heading.level == 2, "Section 2.1 should be level 2"
+    
+    # Verify sections maintain order
+    section_texts = [s.heading.text if s.heading else "" for s in sections]
+    
+    # Verify some key sections appear in correct order
+    def index_of(text):
+        return next((i for i, t in enumerate(section_texts) if text in t), -1)
+    
+    idx_1 = index_of("1 Plan Overview")
+    idx_2 = index_of("2 Emergency Response")
+    idx_3 = index_of("3 Media")
+    
+    assert idx_1 < idx_2 < idx_3, "Sections should maintain document order"

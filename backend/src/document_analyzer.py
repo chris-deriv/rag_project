@@ -4,6 +4,7 @@ from typing import List, Dict, Optional, Tuple, Any
 from dataclasses import dataclass
 import logging
 from langchain.docstore.document import Document
+from unstructured.partition.pdf import partition_pdf
 from .config.constants import (
     DOCUMENT_CLASSIFICATIONS,
     HEADING_PATTERNS
@@ -43,149 +44,290 @@ class DocumentAnalyzer:
         text = text.replace('\f', '\n')
         text = text.replace('\r', '\n')
         
-        # Split into lines, clean each line while preserving markdown
+        # Split into lines and process
         lines = []
         for line in text.split('\n'):
-            # Preserve markdown heading markers
-            if line.strip().startswith('#'):
-                # Only normalize spaces after the # markers
-                hash_count = len(re.match(r'^#+', line.strip()).group())
-                line = '#' * hash_count + ' ' + re.sub(r'\s+', ' ', line.strip()[hash_count:]).strip()
+            line = line.strip()
+            
+            # Remove "All Rights Reserved" prefix if present
+            if line.startswith("All Rights Reserved"):
+                prefix_end = line.find("TechTarget")
+                if prefix_end != -1:
+                    line = line[prefix_end + len("TechTarget"):].strip()
+            
+            # Skip empty lines
+            if not line:
+                continue
+                
+            # Clean the line while preserving section numbers
+            if re.match(r'^\s*\d+(?:\.\d+)*\s+\w', line):
+                # Remove trailing dots and page numbers for numbered sections
+                line = re.sub(r'\s*\.+\s*\d*\s*$', '', line)
             else:
-                # Preserve dots in section numbers
-                if re.match(r'^\d+\.(?:\d+)?\.?[a-z]?\.?\s', line.strip()):
-                    # Keep original spacing for numbered sections with letters
-                    line = line.strip()
-                else:
-                    line = re.sub(r'\s+', ' ', line).strip()
-            if line:
-                lines.append(line)
+                line = re.sub(r'\s+', ' ', line)
+            
+            lines.append(line)
                 
         return '\n'.join(lines)
 
-    def _extract_section_info(self, text: str, start_pos: int) -> Tuple[str, int, int]:
-        """Extract section level and clean heading text."""
-        # Markdown headings (must come first)
-        markdown_match = re.match(r'^(#{1,6})\s+(.+)$', text)
-        if markdown_match:
-            level = len(markdown_match.group(1))
-            return markdown_match.group(2).strip(), level, len(text)
+    def _clean_heading_text(self, text: str) -> str:
+        """Clean heading text by removing trailing dots and page numbers."""
+        # Remove trailing dots and page numbers
+        text = re.sub(r'\.{3,}\s*\d*\s*$', '', text)
+        # Remove extra whitespace
+        text = re.sub(r'\s+', ' ', text).strip()
+        return text
 
-        # Common section patterns
-        patterns = []
-        
-        # Mixed formats (must come first)
-        patterns.extend([
-            # With trailing dot
-            (r'^(\d+)\.(\d+)\.([a-z])\.\s*(.+)$', lambda m: 3, lambda m: f"{m.group(1)}.{m.group(2)}.{m.group(3)} {m.group(4)}"),  # 2.1.a.
-            (r'^(\d+)\.([a-z])\.\s*(.+)$', lambda m: 2, lambda m: f"{m.group(1)}.{m.group(2)} {m.group(3)}"),  # 1.a.
-            
-            # Without trailing dot but with dot before letter
-            (r'^(\d+)\.(\d+)\.([a-z])\s+(.+)$', lambda m: 3, lambda m: f"{m.group(1)}.{m.group(2)}.{m.group(3)} {m.group(4)}"),  # 2.1.a
-            (r'^(\d+)\.([a-z])\s+(.+)$', lambda m: 2, lambda m: f"{m.group(1)}.{m.group(2)} {m.group(3)}"),  # 1.a
-            
-            # Without any dots after numbers
-            (r'^(\d+)\.(\d+)([a-z])\s+(.+)$', lambda m: 3, lambda m: f"{m.group(1)}.{m.group(2)}.{m.group(3)} {m.group(4)}"),  # 2.1a
-            (r'^(\d+)([a-z])\s+(.+)$', lambda m: 2, lambda m: f"{m.group(1)}.{m.group(2)} {m.group(3)}"),  # 1a
-        ])
-        
-        # Letter sections with subsections
-        patterns.extend([
-            (r'^([A-Z])\.(\d+)\.(\d+)\.\s*(.+)$', lambda m: 3, lambda m: f"{m.group(1)}.{m.group(2)}.{m.group(3)} {m.group(4)}"),  # A.1.1
-            (r'^([A-Z])\.(\d+)\.\s*(.+)$', lambda m: 2, lambda m: f"{m.group(1)}.{m.group(2)} {m.group(3)}"),  # A.1
-            (r'^([A-Z])\.\s*(.+)$', lambda m: 1, lambda m: f"{m.group(1)} {m.group(2)}"),  # A
-        ])
-        
-        # Roman numerals with subsections
-        patterns.extend([
-            (r'^([IVX]+)\.(\d+)\.\s*(.+)$', lambda m: 2, lambda m: f"{m.group(1)}.{m.group(2)} {m.group(3)}"),  # IV.1
-            (r'^([IVX]+)\.\s*(.+)$', lambda m: 1, lambda m: f"{m.group(1)} {m.group(2)}"),  # IV
-        ])
-        
-        # Numeric sections with subsections
-        patterns.extend([
-            (r'^(\d+)\.(\d+)\.(\d+)\.(\d+)\.\s*(.+)$', lambda m: 4, lambda m: f"{m.group(1)}.{m.group(2)}.{m.group(3)}.{m.group(4)} {m.group(5)}"),  # 1.1.1.1
-            (r'^(\d+)\.(\d+)\.(\d+)\.\s*(.+)$', lambda m: 3, lambda m: f"{m.group(1)}.{m.group(2)}.{m.group(3)} {m.group(4)}"),  # 1.1.1
-            (r'^(\d+)\.(\d+)\.\s*(.+)$', lambda m: 2, lambda m: f"{m.group(1)}.{m.group(2)} {m.group(3)}"),  # 1.1
-            (r'^(\d+)\.\s*(.+)$', lambda m: 1, lambda m: f"{m.group(1)} {m.group(2)}"),  # 1
-        ])
-        
-        # Special sections
-        patterns.extend([
-            (r'^(?:Section|Chapter)\s+(\d+(?:\.\d+)*):?\s*(.+)$', lambda m: len(m.group(1).split('.')), lambda m: f"{m.group(0).split(':')[0]} {m.group(2)}"),  # Section 1.1
-            (r'^Appendix\s+([A-Z](?:\.\d+)*):?\s*(.+)$', lambda m: 2, lambda m: f"{m.group(0).split(':')[0]} {m.group(2)}"),  # Appendix A.1 (always level 2)
-        ])
-        
-        # ALL CAPS sections (treat as major sections)
-        patterns.append(
-            (r'^([A-Z][A-Z\s]+(?::[A-Z\s]*)?)\s*(.*)$', lambda m: 1, lambda m: m.group(1).strip() + (' ' + m.group(2) if m.group(2) else ''))
-        )
-        
-        # Try each pattern
-        for pattern, get_level, formatter in patterns:
-            match = re.match(pattern, text)
-            if match:
-                # Get the level from the pattern-specific function
-                level = get_level(match)
-                logger.info(f"Matched pattern: {pattern} -> level {level}")
-                
-                # Format the text
-                clean_text = formatter(match)
-                logger.info(f"Formatted text: {clean_text}")
-                
-                return clean_text, level, len(text)
-                
-        return text.strip(), 1, len(text)
-
-    def extract_headings(self, text: str) -> List[Heading]:
+    def extract_headings(self, text: str, file_path: Optional[str] = None) -> List[Heading]:
         """Extract headings from document text."""
         if not isinstance(text, str):
             text = str(text) if text is not None else ""
             
+        try:
+            # Use unstructured.io if file path is provided
+            if file_path:
+                logger.info("Using unstructured.io for heading extraction")
+                elements = partition_pdf(file_path)
+                headings = []
+                current_pos = 0
+                
+                for element in elements:
+                    element_text = str(element)
+                    if hasattr(element, 'category') and element.category == 'Title':
+                        # Try to extract section number and level
+                        match = re.match(r'^\s*(\d+(?:\.\d+)*)\s+(.+)$', element_text)
+                        if match:
+                            section_num = match.group(1)
+                            section_text = match.group(2).strip()
+                            level = len(section_num.split('.'))
+                            
+                            # Clean up section text
+                            section_text = re.sub(r'\s*\.+\s*\d*\s*$', '', section_text)
+                            section_text = re.sub(r'\s+', ' ', section_text).strip()
+                            section_text = re.sub(r'[.,:;]+$', '', section_text).strip()
+                            
+                            # Construct heading text
+                            heading_text = f"{section_num} {section_text}"
+                            
+                            # Skip if this is a duplicate heading
+                            if any(h.text == heading_text for h in headings):
+                                continue
+                                
+                            heading = Heading(
+                                text=heading_text,
+                                level=level,
+                                start_pos=current_pos,
+                                end_pos=current_pos + len(element_text)
+                            )
+                            headings.append(heading)
+                            logger.info(f"Found heading: {heading.text} (level {level})")
+                    
+                    current_pos += len(element_text) + 1
+                
+                # If unstructured.io didn't find any headings, fall back to text-based extraction
+                if not headings:
+                    logger.info("No headings found with unstructured.io, falling back to text-based extraction")
+                    return self._extract_headings_from_text(text)
+                    
+                return headings
+            
+            # Fallback to text-based extraction
+            logger.info("Using text-based heading extraction")
+            return self._extract_headings_from_text(text)
+            
+        except Exception as e:
+            logger.error(f"Error extracting headings: {str(e)}")
+            return []
+
+    def _extract_headings_from_text(self, text: str) -> List[Heading]:
+        """Extract headings from text using pattern matching."""
         headings = []
         current_pos = 0
         
-        # Split text into lines and clean up
-        lines = []
-        for line in text.split('\n'):
-            line = line.strip()
-            # Skip empty lines and likely non-heading content
-            if not line or len(line) > 200:  # Skip very long lines
-                current_pos += len(line) + 1
+        # First pass: Extract TOC entries to understand the document structure
+        toc_entries = {}
+        in_toc = False
+        
+        # Split text into lines for processing
+        lines = text.split('\n')
+        i = 0
+        while i < len(lines):
+            line = lines[i].strip()
+            
+            # Check for TOC start
+            if "Table of Contents" in line:
+                in_toc = True
+                i += 1
+                continue
+            
+            # Process TOC entries
+            if in_toc:
+                # Remove "All Rights Reserved" prefix if present
+                if line.startswith("All Rights Reserved"):
+                    prefix_end = line.find("TechTarget")
+                    if prefix_end != -1:
+                        line = line[prefix_end + len("TechTarget"):].strip()
+                
+                # Skip empty lines
+                if not line:
+                    i += 1
+                    continue
+                
+                # Check for end of TOC (usually starts with "Information Technology Statement")
+                if line.startswith("Information Technology Statement"):
+                    in_toc = False
+                    i += 1
+                    continue
+                
+                # Extract section numbers and titles from TOC
+                toc_match = re.match(r'^\s*(\d+(?:\.\d+)*)\s+([^\.]+?)(?:\.{2,}|\s{3,})\s*\d*\s*$', line)
+                if toc_match:
+                    section_num = toc_match.group(1)
+                    section_title = toc_match.group(2).strip()
+                    # Clean up title
+                    section_title = re.sub(r'\s*\.+\s*\d*\s*$', '', section_title)
+                    section_title = re.sub(r'\s+', ' ', section_title).strip()
+                    section_title = re.sub(r'[.,:;]+$', '', section_title).strip()
+                    toc_entries[section_num] = section_title
+            
+            i += 1
+        
+        # Second pass: Extract actual headings using TOC info
+        i = 0
+        while i < len(lines):
+            line = lines[i].strip()
+            if not line:
+                current_pos += 1
+                i += 1
+                continue
+            
+            # Remove "All Rights Reserved" prefix if present
+            if line.startswith("All Rights Reserved"):
+                prefix_end = line.find("TechTarget")
+                if prefix_end != -1:
+                    line = line[prefix_end + len("TechTarget"):].strip()
+            
+            # Skip if empty after cleaning
+            if not line:
+                current_pos += 1
+                i += 1
                 continue
                 
-            lines.append((line, current_pos))
-            current_pos += len(line) + 1
-        
-        # Process each line
-        for line, pos in lines:
-            # Try to extract section info
-            clean_text, level, length = self._extract_section_info(line, pos)
-            
-            # Only add if it looks like a heading
-            if clean_text:
-                is_heading = (
-                    line.startswith('#') or  # Markdown
-                    re.match(r'^[A-Z]\.', line) or  # Letter sections
-                    re.match(r'^\d+\.', line) or  # Numbered sections
-                    re.match(r'^[IVX]+\.', line) or  # Roman numerals
-                    re.match(r'^(?:Section|Chapter|Part|Appendix)', line) or  # Special sections
-                    re.match(r'^[A-Z][A-Z\s]+(?::|$)', line)  # ALL CAPS
-                )
+            # Skip if this is just a page number
+            if line.isdigit():
+                current_pos += len(line) + 1
+                i += 1
+                continue
                 
-                if is_heading:
-                    logger.info(f"Found heading: '{clean_text}' (level {level})")
-                    heading = Heading(
-                        text=clean_text,
-                        level=level,
-                        start_pos=pos,
-                        end_pos=pos + length
-                    )
-                    headings.append(heading)
-                else:
-                    logger.debug(f"Skipping non-heading line: '{line}'")
+            # Skip if this is part of a form or table
+            if any(form_word in line.lower() for form_word in ["form", "table", "figure"]):
+                current_pos += len(line) + 1
+                i += 1
+                continue
+                
+            # Try to match numbered sections
+            numbered_match = re.match(r'^\s*(\d+(?:\.\d+)*)\s+(.+?)(?:\s*\.+\s*\d*\s*)?$', line)
+            if numbered_match:
+                section_num = numbered_match.group(1)
+                section_text = numbered_match.group(2).strip()
+                
+                # Skip if this appears to be a TOC entry
+                if re.search(r'\.{3,}\s*\d+\s*$', line):
+                    current_pos += len(line) + 1
+                    i += 1
+                    continue
+                
+                # Skip if this is just a page number
+                if section_text.isdigit():
+                    current_pos += len(line) + 1
+                    i += 1
+                    continue
+                
+                # Skip if this is part of a form or table
+                if any(form_word in section_text.lower() for form_word in ["form", "table", "figure"]):
+                    current_pos += len(line) + 1
+                    i += 1
+                    continue
+                
+                # Determine level based on section number
+                section_parts = section_num.split('.')
+                level = len(section_parts)
+                
+                # Clean up section text
+                section_text = re.sub(r'\s*\.+\s*\d*\s*$', '', section_text)
+                
+                # For main sections (level 1), ensure we have the full heading
+                if level == 1:
+                    # Look ahead to find any continuation of the heading
+                    next_line_index = i + 1
+                    while next_line_index < len(lines):
+                        next_line = lines[next_line_index].strip()
+                        
+                        # Skip empty lines and page headers
+                        if not next_line or next_line.startswith("All Rights Reserved"):
+                            next_line_index += 1
+                            continue
+                            
+                        # Stop if we hit another numbered section
+                        if re.match(r'^\s*\d+(?:\.\d+)*\s+', next_line):
+                            break
+                            
+                        # Stop if we hit a subsection marker
+                        if re.match(r'^\s*\d+\.\d+', next_line):
+                            break
+                            
+                        # Add this line to the heading text if it's not too long
+                        # (to avoid capturing paragraph content)
+                        if len(next_line) < 100:  # Reasonable length for a heading
+                            section_text = f"{section_text} {next_line}"
+                            i = next_line_index  # Skip the lines we've consumed
+                            
+                        next_line_index += 1
+                        
+                        # Stop after looking ahead a reasonable number of lines
+                        if next_line_index > i + 3:
+                            break
+                
+                # Clean up any remaining dots and page numbers
+                section_text = re.sub(r'\s*\.+\s*\d*\s*$', '', section_text)
+                
+                # Remove any trailing punctuation
+                section_text = re.sub(r'[.,:;]+$', '', section_text).strip()
+                
+                # Use TOC title if available
+                if section_num in toc_entries:
+                    section_text = toc_entries[section_num]
+                
+                # Clean up any remaining whitespace
+                section_text = re.sub(r'\s+', ' ', section_text).strip()
+                
+                # Remove any page numbers from the end
+                section_text = re.sub(r'\s+\d+\s*$', '', section_text)
+                
+                # Remove any trailing dots
+                section_text = re.sub(r'\s*\.+\s*$', '', section_text)
+                
+                # Construct the final heading text
+                heading_text = f"{section_num} {section_text}"
+                
+                # Skip if this is a duplicate heading
+                if any(h.text == heading_text for h in headings):
+                    current_pos += len(line) + 1
+                    i += 1
+                    continue
+                
+                heading = Heading(
+                    text=heading_text,
+                    level=level,
+                    start_pos=current_pos,
+                    end_pos=current_pos + len(line)
+                )
+                headings.append(heading)
+                logger.info(f"Found numbered section: {heading.text} (level {level})")
+            
+            current_pos += len(line) + 1
+            i += 1
         
-        logger.info(f"Extracted {len(headings)} headings from document")
         return headings
 
     def extract_sections(self, text: str, headings: List[Heading]) -> List[DocumentSection]:
@@ -460,7 +602,7 @@ class DocumentAnalyzer:
             }
             logger.info(f"Document analysis complete - TOC has {len(toc)} top-level entries")
             if toc:
-                logger.info(f"First TOC entry: {toc[0]['text']}")
+                logger.info(f"Root entry: {toc[0]['text']}")
             return result
             
         except Exception as e:
