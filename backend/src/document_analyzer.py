@@ -91,22 +91,75 @@ class DocumentAnalyzer:
                 headings = []
                 current_pos = 0
                 
+                # First pass: Extract TOC entries to understand the document structure
+                toc_entries = {}
+                in_toc = False
+                
+                for element in elements:
+                    element_text = str(element)
+                    if hasattr(element, 'category') and element.category == 'Title':
+                        # Check for TOC start
+                        if "Table of Contents" in element_text:
+                            in_toc = True
+                            continue
+                        
+                        # Process TOC entries
+                        if in_toc:
+                            # Check for end of TOC
+                            if "Information Technology Statement" in element_text:
+                                in_toc = False
+                                continue
+                            
+                            # Extract section numbers and titles from TOC
+                            toc_match = re.match(r'^\s*(\d+(?:\.\d+)*)\s+([^\.]+?)(?:\.{2,}|\s{3,})\s*\d*\s*$', element_text)
+                            if toc_match:
+                                section_num = toc_match.group(1)
+                                section_title = toc_match.group(2).strip()
+                                # Clean up title
+                                section_title = re.sub(r'\s*\.+\s*\d*\s*$', '', section_title)
+                                section_title = re.sub(r'\s+', ' ', section_title).strip()
+                                section_title = re.sub(r'[.,:;]+$', '', section_title).strip()
+                                toc_entries[section_num] = section_title
+                
+                # Second pass: Extract actual headings
                 for element in elements:
                     element_text = str(element)
                     if hasattr(element, 'category') and element.category == 'Title':
                         # Try to extract section number and level
-                        match = re.match(r'^\s*(\d+(?:\.\d+)*)\s+(.+)$', element_text)
+                        match = re.match(r'^\s*(\d+(?:\.\d+)*)\s+(.+?)(?:\s*\.+\s*\d*\s*)?$', element_text)
                         if match:
                             section_num = match.group(1)
                             section_text = match.group(2).strip()
                             level = len(section_num.split('.'))
+                            
+                            # Skip if this appears to be a TOC entry
+                            if re.search(r'\.{3,}\s*\d+\s*$', element_text):
+                                continue
+                            
+                            # Skip if this is just a page number
+                            if section_text.isdigit():
+                                continue
+                            
+                            # Skip if this is part of a form or table
+                            if any(form_word in section_text.lower() for form_word in ["form", "table", "figure"]):
+                                continue
                             
                             # Clean up section text
                             section_text = re.sub(r'\s*\.+\s*\d*\s*$', '', section_text)
                             section_text = re.sub(r'\s+', ' ', section_text).strip()
                             section_text = re.sub(r'[.,:;]+$', '', section_text).strip()
                             
-                            # Construct heading text
+                            # Use TOC title if available
+                            if section_num in toc_entries:
+                                section_text = toc_entries[section_num]
+                            
+                            # Remove any page numbers from the end
+                            section_text = re.sub(r'\s+\d+\s*$', '', section_text)
+                            
+                            # Remove any trailing dots
+                            section_text = re.sub(r'\s*\.+\s*$', '', section_text)
+                            
+                            # Construct the final heading text
                             heading_text = f"{section_num} {section_text}"
                             
                             # Skip if this is a duplicate heading
