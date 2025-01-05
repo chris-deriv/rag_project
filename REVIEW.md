@@ -67,7 +67,85 @@
 
 #### High Priority Issues
 
-1. Document Processing Enhancements
+1. Code Organization and Single Responsibility
+   - Document Processing Layer Issues:
+     ```python
+     # Current: DocumentProcessor mixes concerns
+     class DocumentProcessor:
+         def process_document(self, file_path: str):
+             # Handles text extraction
+             # Handles chunking
+             # Handles metadata
+             # Handles error handling
+     
+     # Proposed: Split into focused classes
+     class TextExtractor:
+         def extract_text(self, file_path: str) -> Tuple[str, str]:
+             """Extract text and title from documents."""
+
+     class DocumentChunker:
+         def chunk_document(self, text: str, metadata: Dict) -> List[DocumentChunk]:
+             """Handle document chunking."""
+
+     class MetadataManager:
+         def prepare_metadata(self, doc: Document) -> Dict:
+             """Centralize metadata handling."""
+     ```
+
+   - Database Layer Issues:
+     ```python
+     # Current: VectorDatabase handles multiple concerns
+     class VectorDatabase:
+         def add_documents(self):  # Storage + validation
+         def query(self):          # Search + filtering
+         def get_metadata(self):   # Metadata management
+     
+     # Proposed: Split responsibilities
+     class DocumentStore:
+         def store_document(self, doc: Document) -> None:
+             """Handle document storage."""
+
+     class DocumentRetriever:
+         def retrieve_documents(self, query: Query) -> List[Document]:
+             """Handle document retrieval."""
+
+     class MetadataValidator:
+         def validate_chunks(self, chunks: List[DocumentChunk]) -> None:
+             """Centralize chunk validation."""
+     ```
+
+   - Search Layer Issues:
+     ```python
+     # Current: SearchEngine mixes concerns
+     class SearchEngine:
+         def search(self):         # Search + embedding + reranking
+         def rerank_results(self): # Reranking + caching
+         def _handle_settings(self): # Settings management
+     
+     # Proposed: Split into services
+     class EmbeddingService:
+         def generate_embeddings(self, text: str) -> np.ndarray:
+             """Handle embedding generation."""
+
+     class SearchService:
+         def search(self, query: str) -> List[Document]:
+             """Handle search operations."""
+
+     class RerankingService:
+         def rerank(self, results: List[Document]) -> List[Document]:
+             """Handle result reranking."""
+     ```
+
+   Rationale:
+   - Improve code organization and maintainability
+   - Reduce duplication of logic
+   - Make testing easier and more focused
+   - Allow for better error handling
+   - Make it easier to modify individual components
+   - Enable better dependency injection
+   - Facilitate future enhancements
+
+2. Document Processing Enhancements
    ```python
    class SemanticChunker:
        def __init__(self, model_name="sentence-transformers/all-mpnet-base-v2"):
@@ -86,7 +164,7 @@
    - Implement parallel processing for large documents
    Rationale: Improves context preservation and retrieval accuracy
 
-2. Search Architecture Improvements
+3. Search Architecture Improvements
    ```python
    class HybridSearcher:
        def __init__(self):
@@ -109,7 +187,7 @@
    - Implement sharding for large collections
    Rationale: Enhances retrieval accuracy and handles complex queries better
 
-3. Response Generation Optimization
+4. Response Generation Optimization
    ```python
    class ResponseGenerator:
        def generate_response(self, query: str, context: List[str], output_format: str = "default"):

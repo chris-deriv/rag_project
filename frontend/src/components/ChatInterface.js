@@ -83,20 +83,26 @@ const ChatInterface = ({ selectedDocuments, onDocumentDelete }) => {
     setError(null);
 
     try {
+      console.log('Making chat API request...');
       const result = await api.chat(
         query,
         selectedDocuments.map(doc => doc.source_name),
         null
       );
+      console.log('Chat API response:', result);
+
       // Ensure consistent content structure
       const messageContent = typeof result.response?.content === 'object' 
         ? result.response.content.content 
         : result.response?.content;
 
       const tocData = result.response?.table_of_contents;
+      console.log('Raw TOC data:', tocData);
+      
       const parsedToc = typeof tocData === 'string'
         ? JSON.parse(tocData)
         : tocData;
+      console.log('Parsed TOC:', parsedToc);
 
       setMessages(prev => [...prev, { 
         type: 'assistant', 
@@ -106,7 +112,10 @@ const ChatInterface = ({ selectedDocuments, onDocumentDelete }) => {
       
       // Update current TOC if available
       if (parsedToc) {
+        console.log('Setting current TOC:', parsedToc);
         setCurrentToc(parsedToc);
+      } else {
+        console.log('No TOC data available in response');
       }
     } catch (err) {
       // Extract error details

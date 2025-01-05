@@ -42,7 +42,7 @@ class TestChatbot:
         assert isinstance(response, dict)
         assert 'content' in response
         assert 'table_of_contents' in response
-        assert response['table_of_contents'] is None
+        assert response['table_of_contents'] == []
 
     def test_generate_response_with_sources_and_toc(self, chatbot):
         """Test response generation with sources and table of contents."""
@@ -143,7 +143,7 @@ class TestChatbot:
         
         response = chatbot.generate_response(context, query)
         
-        assert response['table_of_contents'] is None
+        assert response['table_of_contents'] == []
 
     def test_empty_context(self, chatbot):
         """Test response generation with empty context."""
@@ -152,4 +152,4 @@ class TestChatbot:
         assert isinstance(response, dict)
         assert 'content' in response
         assert 'table_of_contents' in response
-        assert response['table_of_contents'] is None
+        assert response['table_of_contents'] == []

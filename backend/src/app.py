@@ -162,21 +162,41 @@ class RAGApplication:
             # Extract contexts from results with source information
             contexts = []
             for result in results:
+                # Parse TOC if it's a JSON string
+                toc = result['metadata'].get('toc')
+                if isinstance(toc, str):
+                    try:
+                        import json
+                        toc = json.loads(toc)
+                    except:
+                        toc = None
+
                 context = {
                     "text": result['text'],
                     "source": result['metadata'].get('source_name', 'Unknown'),
                     "title": result['metadata'].get('title', ''),
                     "chunk_index": result['metadata'].get('chunk_index', 0),
                     "total_chunks": result['metadata'].get('total_chunks', 1),
-                    "toc": result['metadata'].get('toc')  # Include TOC from metadata
+                    "toc": toc  # Include parsed TOC
                 }
                 contexts.append(context)
             
             # Sort contexts deterministically
             sorted_contexts = self._sort_contexts(contexts)
             
+            # Log TOC information from contexts
+            for ctx in sorted_contexts:
+                if ctx.get('toc'):
+                    logger.info(f"Context has TOC: {ctx['toc']}")
+                    break
+            
             # Generate response with source citations
             response = self.chatbot.generate_response_with_sources(sorted_contexts, query)
+            
+            # Log response structure
+            logger.info(f"Response structure: {response.keys() if isinstance(response, dict) else 'Not a dict'}")
+            if isinstance(response, dict) and 'table_of_contents' in response:
+                logger.info(f"Response includes TOC with {len(response['table_of_contents'])} entries")
             
             logger.info("Query processed successfully")
             return response

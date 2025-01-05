@@ -3,6 +3,7 @@ import httpx
 from openai import OpenAI
 import copy
 import logging
+import json
 from src.config.settings import OPENAI_API_KEY
 from src.config.dynamic_settings import settings_manager
 
@@ -89,7 +90,7 @@ class Chatbot:
             response_text = response.choices[0].message.content.strip()
             
             # Get TOC from context if available
-            toc = None
+            toc = None  # Default to None to indicate no TOC found
             if isinstance(context, str):
                 # Try to extract TOC from the first chunk's metadata
                 try:
@@ -101,10 +102,16 @@ class Chatbot:
                             toc_json = line[toc_start:].strip()
                             if toc_json.endswith(','):
                                 toc_json = toc_json[:-1]
-                            toc = json.loads(toc_json)
+                            parsed_toc = json.loads(toc_json)
+                            if parsed_toc is not None:  # Only update if we got a valid value
+                                toc = parsed_toc
                             break
-                except:
-                    pass
+                except Exception as e:
+                    logger.error(f"Error parsing TOC JSON: {str(e)}")
+            
+            # If no TOC found, use empty list
+            if toc is None:
+                toc = []
             
             result = {
                 'content': response_text,
@@ -210,16 +217,39 @@ class Chatbot:
             response_text = response.choices[0].message.content.strip()
             
             # Get TOC from the first context that has it
-            toc = None
+            toc = None  # Default to None to indicate no TOC found
             for context in contexts:
                 if 'toc' in context:
-                    toc = context['toc']
-                    break
+                    try:
+                        # If it's already a list, use it directly
+                        if isinstance(context['toc'], list):
+                            toc = context['toc']
+                            logger.info(f"Found TOC in context: {json.dumps(toc)}")
+                            break
+                        # If it's a string, try to parse it as JSON
+                        elif isinstance(context['toc'], str):
+                            parsed_toc = json.loads(context['toc'])
+                            if isinstance(parsed_toc, list):
+                                toc = parsed_toc
+                                logger.info(f"Found TOC in context: {json.dumps(toc)}")
+                                break
+                    except Exception as e:
+                        logger.error(f"Error parsing TOC from context: {str(e)}")
+                        continue
+            
+            # If no TOC found, use empty list
+            if toc is None:
+                toc = []
+            
+            if not toc:
+                logger.info("No TOC found in contexts")
+                logger.debug(f"Context keys: {[list(ctx.keys()) for ctx in contexts]}")
             
             result = {
                 'content': response_text,
                 'table_of_contents': toc
             }
+            logger.info(f"Generated response with TOC: {bool(toc)}")
             
             # Cache the response
             self._response_cache[cache_key] = result

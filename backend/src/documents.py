@@ -89,8 +89,13 @@ class DocumentProcessor:
             chunk_size=self.chunk_size,
             chunk_overlap=self.chunk_overlap,
             length_function=self._get_length_function(),
-            is_separator_regex=False
+            is_separator_regex=False,
+            add_start_index=True  # Ensure we get accurate start positions
         )
+        
+        logger.info(f"Text splitter initialized with chunk_size={self.chunk_size}, "
+                   f"chunk_overlap={self.chunk_overlap}, "
+                   f"length_function={self.length_function}")
 
     def _get_length_function(self) -> callable:
         """Get the appropriate length function based on settings."""
@@ -98,25 +103,36 @@ class DocumentProcessor:
             return lambda x: len(self.tokenizer.encode(x))
         return len
 
-    def _split_section(self, section: DocumentSection, metadata: Dict[str, Any]) -> List[DocumentChunk]:
+    def _split_section(self, section: DocumentSection, metadata: Dict[str, Any], total_chunks: Optional[int] = None, start_index: int = 0) -> List[DocumentChunk]:
         """Split a section into chunks while preserving metadata."""
         if not section.text.strip():
             return []
             
+        # Extract heading and content
+        heading_text = section.heading.text if section.heading else ""
+        
         # Split text into chunks
         raw_chunks = self.text_splitter.split_text(section.text)
         
         if len(raw_chunks) > 1:
             logger.info(f"Split section into {len(raw_chunks)} chunks")
+            logger.info(f"First chunk: {raw_chunks[0][:100]}...")
+            logger.info(f"Last chunk: {raw_chunks[-1][:100]}...")
         
         # Create document chunks with metadata
         chunks = []
         for i, chunk_text in enumerate(raw_chunks):
+            # Ensure each chunk starts with the section heading
+            if i > 0:  # Not first chunk
+                chunk_text = heading_text + "\n" + chunk_text
+            
             chunk_metadata = {
                 **metadata,
-                'chunk_index': i,
-                'total_chunks': len(raw_chunks)
+                'chunk_index': start_index + i,  # Use provided start index
+                'total_chunks': total_chunks  # Always use total chunks across all sections
             }
+            
+            logger.info(f"Creating chunk {i} with index {start_index + i} of {total_chunks} total chunks")
             
             # Add section metadata if available
             if section.heading:
@@ -124,6 +140,7 @@ class DocumentProcessor:
                     'section_title': section.heading.text,
                     'section_level': section.heading.level
                 })
+                logger.info(f"Added section metadata: {section.heading.text} (level {section.heading.level})")
             
             chunk = DocumentChunk(
                 id=str(uuid.uuid4()),
@@ -132,6 +149,71 @@ class DocumentProcessor:
             )
             chunks.append(chunk)
             
+        return chunks
+
+    def process_document(self, file_path: str) -> List[DocumentChunk]:
+        """Process a document file into chunks with metadata."""
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"File not found: {file_path}")
+            
+        # Get original filename and extension for metadata
+        original_filename = os.path.basename(file_path)
+        file_ext = os.path.splitext(file_path)[1].lower()
+        
+        # Extract text based on file type
+        if file_ext == '.pdf':
+            title, full_text = self._extract_pdf_text(file_path)
+        elif file_ext in ['.doc', '.docx']:
+            title, full_text = self._extract_docx_text(file_path)
+        else:
+            raise ValueError(f"Unsupported file type: {file_ext}")
+            
+        # Analyze document structure and content
+        logger.info(f"Analyzing document: {title}")
+        analysis = self.analyzer.analyze_document(full_text, title)
+        logger.info(f"Document analysis complete")
+        logger.info(f"Analysis TOC: {json.dumps(analysis['toc'], indent=2)}")
+        
+        # Base metadata for all chunks
+        base_metadata = {
+            'source_name': original_filename,
+            'title': title,
+            'file_type': file_ext.lstrip('.'),
+            'classification': analysis['classification'],
+            'toc': json.dumps(analysis['toc'])  # Convert TOC to JSON string
+        }
+        logger.info(f"Base metadata TOC: {base_metadata['toc']}")
+        
+        # First pass to count total chunks and prepare sections
+        total_chunks = 0
+        section_chunk_counts = []  # Track chunks per section
+        for section in analysis['sections']:
+            # Split text into chunks but don't process yet
+            raw_chunks = self.text_splitter.split_text(section.text)
+            section_chunk_counts.append(len(raw_chunks))
+            total_chunks += len(raw_chunks)
+        
+        logger.info(f"Pre-analysis: Total chunks across all sections: {total_chunks}")
+        for i, count in enumerate(section_chunk_counts):
+            logger.info(f"Section {i+1}: {count} chunks")
+        
+        # Process each section into chunks with correct total count
+        chunks = []
+        current_index = 0
+        for i, section in enumerate(analysis['sections']):
+            logger.info(f"Processing section {i+1}/{len(analysis['sections'])}")
+            logger.info(f"Current index before processing: {current_index}")
+            logger.info(f"Expected chunks for this section: {section_chunk_counts[i]}")
+            section_chunks = self._split_section(section, base_metadata, total_chunks, current_index)
+            logger.info(f"Generated {len(section_chunks)} chunks for section")
+            logger.info(f"First chunk index: {section_chunks[0].metadata['chunk_index'] if section_chunks else 'N/A'}")
+            logger.info(f"Last chunk index: {section_chunks[-1].metadata['chunk_index'] if section_chunks else 'N/A'}")
+            chunks.extend(section_chunks)
+            current_index += len(section_chunks)
+            logger.info(f"Current index after processing: {current_index}")
+            
+        logger.info(f"Processed document into {len(chunks)} chunks")
+        logger.info(f"First chunk metadata TOC: {chunks[0].metadata.get('toc') if chunks else 'No chunks'}")
         return chunks
 
     def _get_title_from_content(self, text: str, filename: str) -> Optional[str]:
@@ -260,46 +342,6 @@ class DocumentProcessor:
         except Exception as e:
             raise ValueError(f"Error during DOC to DOCX conversion: {str(e)}")
 
-    def process_document(self, file_path: str) -> List[DocumentChunk]:
-        """Process a document file into chunks with metadata."""
-        if not os.path.exists(file_path):
-            raise FileNotFoundError(f"File not found: {file_path}")
-            
-        # Get original filename and extension for metadata
-        original_filename = os.path.basename(file_path)
-        file_ext = os.path.splitext(file_path)[1].lower()
-        
-        # Extract text based on file type
-        if file_ext == '.pdf':
-            title, full_text = self._extract_pdf_text(file_path)
-        elif file_ext in ['.doc', '.docx']:
-            title, full_text = self._extract_docx_text(file_path)
-        else:
-            raise ValueError(f"Unsupported file type: {file_ext}")
-            
-        # Analyze document structure and content
-        logger.info(f"Analyzing document: {title}")
-        analysis = self.analyzer.analyze_document(full_text, title)
-        logger.info(f"Document analysis complete")
-        
-        # Base metadata for all chunks
-        base_metadata = {
-            'source_name': original_filename,
-            'title': title,
-            'file_type': file_ext.lstrip('.'),
-            'classification': analysis['classification'],
-            'toc': json.dumps(analysis['toc'])  # Convert TOC to JSON string
-        }
-        
-        # Process each section into chunks
-        chunks = []
-        for section in analysis['sections']:
-            section_chunks = self._split_section(section, base_metadata)
-            chunks.extend(section_chunks)
-            
-        logger.info(f"Processed document into {len(chunks)} chunks")
-        return chunks
-
     def __del__(self):
         """Clean up by removing observer when object is destroyed."""
         try:
@@ -324,6 +366,8 @@ class DocumentStore:
         """Update the processing state for a document."""
         self._processing_states[filename] = state
         logger.info(f"Updated processing state for {filename}: {state}")
+        if state.toc:
+            logger.info(f"Processing state TOC: {json.dumps(state.toc, indent=2)}")
     
     def process_and_store_document(self, file_path: str) -> ProcessingState:
         """
@@ -354,7 +398,14 @@ class DocumentStore:
             # Add classification and TOC information from first chunk's metadata
             if chunks:
                 state.classification = chunks[0].metadata['classification']
-                state.toc = json.loads(chunks[0].metadata['toc'])  # Parse JSON string back to list
+                toc_str = chunks[0].metadata['toc']
+                logger.info(f"Raw TOC from metadata: {toc_str}")
+                try:
+                    state.toc = json.loads(toc_str)  # Parse JSON string back to list
+                    logger.info(f"Parsed TOC structure: {json.dumps(state.toc, indent=2)}")
+                except Exception as e:
+                    logger.error(f"Error parsing TOC JSON: {str(e)}")
+                    state.toc = None
             self._update_processing_state(filename, state)
             
             # 2. Generate embeddings (single point of embedding generation)
@@ -442,7 +493,12 @@ class DocumentStore:
         # Parse TOC JSON string back to list
         toc = chunks[0].get('toc')
         if isinstance(toc, str):
-            toc = json.loads(toc)
+            try:
+                toc = json.loads(toc)
+                logger.info(f"Parsed TOC from document info: {json.dumps(toc, indent=2)}")
+            except Exception as e:
+                logger.error(f"Error parsing TOC JSON in document info: {str(e)}")
+                toc = None
             
         return {
             'source_name': source_name,

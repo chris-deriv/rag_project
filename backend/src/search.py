@@ -178,10 +178,25 @@ class SearchEngine:
             distance_weight = 1 - relevance_weight
             combined_score = (distance_weight * norm_distance) + (relevance_weight * norm_relevance)
             
+            # Ensure TOC is properly extracted from metadata
+            metadata = texts[i]
+            toc = None
+            if isinstance(metadata.get('toc'), str):
+                try:
+                    import json
+                    toc = json.loads(metadata['toc'])
+                except:
+                    pass
+            elif isinstance(metadata.get('toc'), (list, dict)):
+                toc = metadata['toc']
+
             results.append({
                 'id': ids[i],
                 'text': texts[i]['text'],
-                'metadata': texts[i],
+                'metadata': {
+                    **texts[i],
+                    'toc': toc  # Ensure TOC is properly structured
+                },
                 'similarity_score': 1 - distances[i],
                 'relevance_score': relevance_scores[i],
                 'combined_score': combined_score

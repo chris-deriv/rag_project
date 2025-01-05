@@ -6,6 +6,7 @@ from typing import List, Dict, Any, Optional, Union
 import numpy as np
 import logging
 import os
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -75,9 +76,35 @@ class VectorDatabase:
             docs_by_source[source_name].append(doc)
         
         for source_name, source_docs in docs_by_source.items():
+            # Sort chunks by index to check sequence
+            source_docs.sort(key=lambda x: x.get('chunk_index', 0))
+            
+            # Log chunk information for debugging
+            logger.info(f"\nValidating chunks for {source_name}:")
+            for doc in source_docs:
+                logger.info(f"Chunk {doc.get('chunk_index')}/{doc.get('total_chunks')} - ID: {doc.get('id')}")
+            
+            # Verify total_chunks matches actual count
             total_chunks = source_docs[0].get('total_chunks')
             if not all(doc.get('total_chunks') == total_chunks for doc in source_docs):
+                logger.error(f"Inconsistent total_chunks values for {source_name}:")
+                for doc in source_docs:
+                    logger.error(f"  Chunk {doc.get('chunk_index')} has total_chunks={doc.get('total_chunks')}")
                 raise ValueError(f"Inconsistent total_chunks values for document {source_name}")
+            
+            # Verify chunk indices are sequential
+            indices = [doc.get('chunk_index', -1) for doc in source_docs]
+            expected_indices = list(range(len(source_docs)))
+            if indices != expected_indices:
+                logger.error(f"Non-sequential chunk indices for {source_name}:")
+                logger.error(f"Got {indices}, expected {expected_indices}")
+                logger.error("Chunk details:")
+                for doc in source_docs:
+                    logger.error(f"  ID: {doc.get('id')} - Index: {doc.get('chunk_index')}")
+                raise ValueError(
+                    f"Non-sequential chunk indices for {source_name}: "
+                    f"got {indices}, expected {expected_indices}"
+                )
 
     def add_documents(self, documents: List[Dict[str, Any]]) -> None:
         """Add documents to the vector database."""
@@ -201,6 +228,19 @@ class VectorDatabase:
                     n_results=n_results,
                     include=['metadatas', 'distances', 'documents']
                 )
+
+            # Log TOC information from results
+            if results['metadatas'] and results['metadatas'][0]:
+                for i, metadata in enumerate(results['metadatas'][0]):
+                    toc = metadata.get('toc')
+                    logger.info(f"Result {i} TOC: {toc}")
+                    if isinstance(toc, str):
+                        try:
+                            parsed_toc = json.loads(toc)
+                            logger.info(f"Parsed TOC: {json.dumps(parsed_toc, indent=2)}")
+                        except Exception as e:
+                            logger.error(f"Error parsing TOC JSON in query result: {str(e)}")
+
             return results
         except Exception as e:
             logger.error(f"Error querying vector database: {str(e)}")

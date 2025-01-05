@@ -217,22 +217,88 @@ Content 3"""
         assert "Content 3" in sections[1].text
 
 class TestTableOfContents:
-    def test_toc_generation(self, analyzer):
-        """Test generation of table of contents."""
+    def test_complex_toc_generation(self, analyzer):
+        """Test generation of complex hierarchical table of contents."""
         headings = [
-            Heading("Main Title", 1, 0, 10),
-            Heading("Section 1", 2, 20, 30),
-            Heading("Subsection 1.1", 3, 40, 50),
-            Heading("Section 2", 2, 60, 70)
+            Heading("Test Document Title", 1, 0, 10),
+            Heading("1. Introduction", 2, 20, 30),
+            Heading("1.1. Background", 3, 40, 50),
+            Heading("1.2. Purpose", 3, 60, 70),
+            Heading("2. Methodology", 2, 80, 90),
+            Heading("2.1. Process Steps", 3, 100, 110),
+            Heading("2.1.1. Planning", 4, 120, 130),
+            Heading("2.1.2. Implementation", 4, 140, 150),
+            Heading("2.2. Data Collection", 3, 160, 170),
+            Heading("2.2.1. Primary Sources", 4, 180, 190),
+            Heading("2.2.1.1. Interviews", 5, 200, 210),
+            Heading("2.2.1.2. Surveys", 5, 220, 230),
+            Heading("2.2.2. Secondary Sources", 4, 240, 250),
+            Heading("3. Results", 2, 260, 270),
+            Heading("3.1. Key Findings", 3, 280, 290),
+            Heading("3.2. Analysis", 3, 300, 310),
+            Heading("Appendix A: Reference Data", 2, 320, 330),
+            Heading("A.1. Data Tables", 3, 340, 350),
+            Heading("A.2. Methodology Details", 3, 360, 370),
+            Heading("GLOSSARY", 2, 380, 390)
         ]
         
         toc = analyzer.build_toc(headings)
-        assert len(toc) == 1  # One top-level entry
-        assert toc[0]['text'] == "Main Title"
-        assert len(toc[0]['children']) == 2  # Two sections
-        assert toc[0]['children'][0]['text'] == "Section 1"
-        assert len(toc[0]['children'][0]['children']) == 1  # One subsection
-        assert toc[0]['children'][0]['children'][0]['text'] == "Subsection 1.1"
+        
+        # Verify root structure
+        assert len(toc) == 1  # Only the title at root level
+        assert toc[0]['text'] == "Test Document Title"
+        root = toc[0]
+        
+        # Verify main sections
+        assert len(root['children']) == 5  # Introduction, Methodology, Results, Appendix, Glossary
+        
+        # Verify Introduction section
+        intro = root['children'][0]
+        assert intro['text'] == "1. Introduction"
+        assert len(intro['children']) == 2  # Background and Purpose
+        assert intro['children'][0]['text'] == "1.1. Background"
+        assert intro['children'][1]['text'] == "1.2. Purpose"
+        
+        # Verify Methodology section
+        method = root['children'][1]
+        assert method['text'] == "2. Methodology"
+        assert len(method['children']) == 2  # Process Steps and Data Collection
+        
+        # Verify Process Steps subsection
+        process = method['children'][0]
+        assert process['text'] == "2.1. Process Steps"
+        assert len(process['children']) == 2  # Planning and Implementation
+        assert process['children'][0]['text'] == "2.1.1. Planning"
+        assert process['children'][1]['text'] == "2.1.2. Implementation"
+        
+        # Verify Data Collection subsection
+        data = method['children'][1]
+        assert data['text'] == "2.2. Data Collection"
+        assert len(data['children']) == 2  # Primary and Secondary Sources
+        
+        # Verify Primary Sources sub-subsection
+        primary = data['children'][0]
+        assert primary['text'] == "2.2.1. Primary Sources"
+        assert len(primary['children']) == 2  # Interviews and Surveys
+        assert primary['children'][0]['text'] == "2.2.1.1. Interviews"
+        assert primary['children'][1]['text'] == "2.2.1.2. Surveys"
+        
+        # Verify Results section
+        results = root['children'][2]
+        assert results['text'] == "3. Results"
+        assert len(results['children']) == 2  # Key Findings and Analysis
+        assert results['children'][0]['text'] == "3.1. Key Findings"
+        assert results['children'][1]['text'] == "3.2. Analysis"
+        
+        # Verify Appendix section
+        appendix = root['children'][3]
+        assert appendix['text'] == "Appendix A: Reference Data"
+        assert len(appendix['children']) == 2  # Data Tables and Methodology Details
+        assert appendix['children'][0]['text'] == "A.1. Data Tables"
+        assert appendix['children'][1]['text'] == "A.2. Methodology Details"
+        
+        # Verify Glossary section
+        assert root['children'][4]['text'] == "GLOSSARY"
 
     def test_toc_with_missing_levels(self, analyzer):
         """Test TOC generation with missing heading levels."""
@@ -276,39 +342,56 @@ class TestDocumentClassification:
 class TestDocumentAnalysis:
     def test_complete_document_analysis(self, analyzer):
         """Test complete document analysis including TOC and classification."""
-        document = """# HR Policy Manual
-## Employee Guidelines
-### Code of Conduct
-All employees must follow these guidelines...
-### Leave Policy
-Annual leave and sick leave policies...
-## Performance Reviews
-### Review Process
-The annual review process includes..."""
+        with open('tests/test_data/test.md', 'r') as f:
+            document = f.read()
 
-        result = analyzer.analyze_document(document, "HR Policy Manual")
-        
-        # Verify classification
-        assert result['classification'] == 'human_resources'
+        result = analyzer.analyze_document(document, "Test Document Title")
         
         # Verify TOC structure
-        assert len(result['toc']) == 1  # One top-level entry
-        assert result['toc'][0]['text'] == "HR Policy Manual"
-        assert len(result['toc'][0]['children']) == 2  # Two main sections
+        assert len(result['toc']) == 1  # Only title at root
+        root = result['toc'][0]
+        assert root['text'] == "Test Document Title"
+        
+        # Verify main sections
+        assert len(root['children']) == 5  # Introduction, Methodology, Results, Appendix, Glossary
+        
+        # Verify Introduction section
+        intro = root['children'][0]
+        assert intro['text'] == "1. Introduction"
+        assert len(intro['children']) == 2  # Background and Purpose
+        
+        # Verify Methodology section with deep nesting
+        method = root['children'][1]
+        assert method['text'] == "2. Methodology"
+        assert len(method['children']) == 2  # Process Steps and Data Collection
+        
+        # Verify Process Steps subsection
+        process = method['children'][0]
+        assert process['text'] == "2.1. Process Steps"
+        assert len(process['children']) == 2  # Planning and Implementation
+        
+        # Verify Data Collection subsection with deep nesting
+        data = method['children'][1]
+        assert data['text'] == "2.2. Data Collection"
+        assert len(data['children']) == 2  # Primary and Secondary Sources
+        
+        # Verify Primary Sources with deepest nesting
+        primary = data['children'][0]
+        assert primary['text'] == "2.2.1. Primary Sources"
+        assert len(primary['children']) == 2  # Interviews and Surveys
         
         # Verify headings
-        assert len(result['headings']) == 6  # Total number of headings
+        assert len(result['headings']) == 20  # Total number of headings
         assert all(isinstance(h, Heading) for h in result['headings'])
-        assert result['headings'][0].text == "HR Policy Manual"
+        assert result['headings'][0].text == "Test Document Title"
         assert result['headings'][0].level == 1
         
         # Verify sections
-        assert len(result['sections']) == 6  # One section per heading
+        assert len(result['sections']) == 20  # One section per heading
         assert all(isinstance(s, DocumentSection) for s in result['sections'])
         assert all(s.heading is not None for s in result['sections'])
-        assert result['sections'][0].heading.text == "HR Policy Manual"
-        assert "Code of Conduct" in result['sections'][2].heading.text
-        assert "guidelines" in result['sections'][2].text.lower()
+        assert result['sections'][0].heading.text == "Test Document Title"
+        assert "methodology" in result['sections'][4].text.lower()
 
     def test_error_handling(self, analyzer):
         """Test error handling in document analysis."""

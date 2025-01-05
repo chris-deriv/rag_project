@@ -146,8 +146,17 @@ def chat():
             title=title
         )
 
+        # Log TOC information
+        if isinstance(response, dict) and 'table_of_contents' in response:
+            logger.info(f"TOC found in response: {response['table_of_contents']}")
+        else:
+            logger.warning("No TOC found in response")
+            logger.info(f"Response keys: {response.keys() if isinstance(response, dict) else 'Not a dict'}")
+
         # The response already contains table_of_contents from chatbot
-        return jsonify({'response': response})
+        result = {'response': response}
+        logger.info(f"Final API response structure: {result.keys()}")
+        return jsonify(result)
     except Exception as e:
         logger.error(f"Error in chat endpoint: {str(e)}")
         return jsonify({'error': str(e)}), 500

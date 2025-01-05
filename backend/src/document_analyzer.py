@@ -72,55 +72,68 @@ class DocumentAnalyzer:
             return markdown_match.group(2).strip(), level, len(text)
 
         # Common section patterns
-        patterns = [
-            # Mixed formats (must come first)
-            (r'^(\d+)\.(\d+)\.([a-z])\.\s*(.+)$', 3, lambda m: f"{m.group(1)}.{m.group(2)}.{m.group(3)} {m.group(4)}"),  # 2.1.a
-            (r'^(\d+)\.([a-z])\.\s*(.+)$', 2, lambda m: f"{m.group(1)}.{m.group(2)} {m.group(3)}"),  # 1.a
+        patterns = []
+        
+        # Mixed formats (must come first)
+        patterns.extend([
+            # With trailing dot
+            (r'^(\d+)\.(\d+)\.([a-z])\.\s*(.+)$', lambda m: 3, lambda m: f"{m.group(1)}.{m.group(2)}.{m.group(3)} {m.group(4)}"),  # 2.1.a.
+            (r'^(\d+)\.([a-z])\.\s*(.+)$', lambda m: 2, lambda m: f"{m.group(1)}.{m.group(2)} {m.group(3)}"),  # 1.a.
             
-            # Letter sections with subsections
-            (r'^([A-Z])\.(\d+)\.(\d+)\.\s*(.+)$', 3, lambda m: f"{m.group(1)}.{m.group(2)}.{m.group(3)} {m.group(4)}"),  # A.1.1
-            (r'^([A-Z])\.(\d+)\.\s*(.+)$', 2, lambda m: f"{m.group(1)}.{m.group(2)} {m.group(3)}"),  # A.1
-            (r'^([A-Z])\.\s*(.+)$', 1, lambda m: f"{m.group(1)} {m.group(2)}"),  # A
+            # Without trailing dot but with dot before letter
+            (r'^(\d+)\.(\d+)\.([a-z])\s+(.+)$', lambda m: 3, lambda m: f"{m.group(1)}.{m.group(2)}.{m.group(3)} {m.group(4)}"),  # 2.1.a
+            (r'^(\d+)\.([a-z])\s+(.+)$', lambda m: 2, lambda m: f"{m.group(1)}.{m.group(2)} {m.group(3)}"),  # 1.a
             
-            # Roman numerals with subsections
-            (r'^([IVX]+)\.(\d+)\.\s*(.+)$', 3, lambda m: f"{m.group(1)}.{m.group(2)} {m.group(3)}"),  # IV.1
-            (r'^([IVX]+)\.\s*(.+)$', 2, lambda m: f"{m.group(1)} {m.group(2)}"),  # IV
-            
-            # Numeric sections with subsections
-            (r'^(\d+)\.(\d+)\.([a-z])\.\s*(.+)$', 3, lambda m: f"{m.group(1)}.{m.group(2)}.{m.group(3)} {m.group(4)}"),  # 2.1.a
-            (r'^(\d+)\.(\d+)\.\s*(.+)$', 2, lambda m: f"{m.group(1)}.{m.group(2)} {m.group(3)}"),  # 2.1
-            (r'^(\d+)\.\s*(.+)$', 1, lambda m: f"{m.group(1)} {m.group(2)}"),  # 1
-            
-            # Special sections
-            (r'^(?:Section|Chapter)\s+(\d+(?:\.\d+)*):?\s*(.+)$', 1, lambda m: f"{m.group(0).split(':')[0]} {m.group(2)}"),  # Section 1.1
-            (r'^Appendix\s+([A-Z](?:\.\d+)*):?\s*(.+)$', 2, lambda m: f"{m.group(0).split(':')[0]} {m.group(2)}"),  # Appendix A.1
-            
-            # ALL CAPS sections (treat as major sections)
-            (r'^([A-Z][A-Z\s]+(?::[A-Z\s]*)?)\s*(.*)$', 1, lambda m: m.group(1).strip() + (' ' + m.group(2) if m.group(2) else '')),
-        ]
+            # Without any dots after numbers
+            (r'^(\d+)\.(\d+)([a-z])\s+(.+)$', lambda m: 3, lambda m: f"{m.group(1)}.{m.group(2)}.{m.group(3)} {m.group(4)}"),  # 2.1a
+            (r'^(\d+)([a-z])\s+(.+)$', lambda m: 2, lambda m: f"{m.group(1)}.{m.group(2)} {m.group(3)}"),  # 1a
+        ])
+        
+        # Letter sections with subsections
+        patterns.extend([
+            (r'^([A-Z])\.(\d+)\.(\d+)\.\s*(.+)$', lambda m: 3, lambda m: f"{m.group(1)}.{m.group(2)}.{m.group(3)} {m.group(4)}"),  # A.1.1
+            (r'^([A-Z])\.(\d+)\.\s*(.+)$', lambda m: 2, lambda m: f"{m.group(1)}.{m.group(2)} {m.group(3)}"),  # A.1
+            (r'^([A-Z])\.\s*(.+)$', lambda m: 1, lambda m: f"{m.group(1)} {m.group(2)}"),  # A
+        ])
+        
+        # Roman numerals with subsections
+        patterns.extend([
+            (r'^([IVX]+)\.(\d+)\.\s*(.+)$', lambda m: 2, lambda m: f"{m.group(1)}.{m.group(2)} {m.group(3)}"),  # IV.1
+            (r'^([IVX]+)\.\s*(.+)$', lambda m: 1, lambda m: f"{m.group(1)} {m.group(2)}"),  # IV
+        ])
+        
+        # Numeric sections with subsections
+        patterns.extend([
+            (r'^(\d+)\.(\d+)\.(\d+)\.(\d+)\.\s*(.+)$', lambda m: 4, lambda m: f"{m.group(1)}.{m.group(2)}.{m.group(3)}.{m.group(4)} {m.group(5)}"),  # 1.1.1.1
+            (r'^(\d+)\.(\d+)\.(\d+)\.\s*(.+)$', lambda m: 3, lambda m: f"{m.group(1)}.{m.group(2)}.{m.group(3)} {m.group(4)}"),  # 1.1.1
+            (r'^(\d+)\.(\d+)\.\s*(.+)$', lambda m: 2, lambda m: f"{m.group(1)}.{m.group(2)} {m.group(3)}"),  # 1.1
+            (r'^(\d+)\.\s*(.+)$', lambda m: 1, lambda m: f"{m.group(1)} {m.group(2)}"),  # 1
+        ])
+        
+        # Special sections
+        patterns.extend([
+            (r'^(?:Section|Chapter)\s+(\d+(?:\.\d+)*):?\s*(.+)$', lambda m: len(m.group(1).split('.')), lambda m: f"{m.group(0).split(':')[0]} {m.group(2)}"),  # Section 1.1
+            (r'^Appendix\s+([A-Z](?:\.\d+)*):?\s*(.+)$', lambda m: 2, lambda m: f"{m.group(0).split(':')[0]} {m.group(2)}"),  # Appendix A.1 (always level 2)
+        ])
+        
+        # ALL CAPS sections (treat as major sections)
+        patterns.append(
+            (r'^([A-Z][A-Z\s]+(?::[A-Z\s]*)?)\s*(.*)$', lambda m: 1, lambda m: m.group(1).strip() + (' ' + m.group(2) if m.group(2) else ''))
+        )
         
         # Try each pattern
-        for pattern, level, formatter in patterns:
+        for pattern, get_level, formatter in patterns:
             match = re.match(pattern, text)
             if match:
-                # Special handling for mixed formats to preserve dots
-                if '.a.' in text or '.a ' in text:
-                    # Extract the original format up to the content
-                    prefix = text[:text.index(' ')].strip()
-                    content = text[text.index(' '):].strip()
-                    # Increase level for letter suffixes
-                    if re.search(r'\.[a-z]\.?$', prefix):
-                        level += 1
-                    return f"{prefix} {content}", level, len(text)
-                    
-                # Special handling for Roman numerals
-                if re.match(r'^[IVX]+\.', text):
-                    if '.' in text[:-1]:  # Has subsection (e.g., I.1)
-                        level = 3  # Roman numeral subsections are level 3
-                    else:
-                        level = 2  # Plain Roman numerals are level 2
-                    
-                return formatter(match), level, len(text)
+                # Get the level from the pattern-specific function
+                level = get_level(match)
+                logger.info(f"Matched pattern: {pattern} -> level {level}")
+                
+                # Format the text
+                clean_text = formatter(match)
+                logger.info(f"Formatted text: {clean_text}")
+                
+                return clean_text, level, len(text)
                 
         return text.strip(), 1, len(text)
 
@@ -150,21 +163,27 @@ class DocumentAnalyzer:
             clean_text, level, length = self._extract_section_info(line, pos)
             
             # Only add if it looks like a heading
-            if clean_text and (
-                line.startswith('#') or  # Markdown
-                re.match(r'^[A-Z]\.', line) or  # Letter sections
-                re.match(r'^\d+\.', line) or  # Numbered sections
-                re.match(r'^[IVX]+\.', line) or  # Roman numerals
-                re.match(r'^(?:Section|Chapter|Part|Appendix)', line) or  # Special sections
-                re.match(r'^[A-Z][A-Z\s]+(?::|$)', line)  # ALL CAPS
-            ):
-                heading = Heading(
-                    text=clean_text,
-                    level=level,
-                    start_pos=pos,
-                    end_pos=pos + length
+            if clean_text:
+                is_heading = (
+                    line.startswith('#') or  # Markdown
+                    re.match(r'^[A-Z]\.', line) or  # Letter sections
+                    re.match(r'^\d+\.', line) or  # Numbered sections
+                    re.match(r'^[IVX]+\.', line) or  # Roman numerals
+                    re.match(r'^(?:Section|Chapter|Part|Appendix)', line) or  # Special sections
+                    re.match(r'^[A-Z][A-Z\s]+(?::|$)', line)  # ALL CAPS
                 )
-                headings.append(heading)
+                
+                if is_heading:
+                    logger.info(f"Found heading: '{clean_text}' (level {level})")
+                    heading = Heading(
+                        text=clean_text,
+                        level=level,
+                        start_pos=pos,
+                        end_pos=pos + length
+                    )
+                    headings.append(heading)
+                else:
+                    logger.debug(f"Skipping non-heading line: '{line}'")
         
         logger.info(f"Extracted {len(headings)} headings from document")
         return headings
@@ -187,21 +206,41 @@ class DocumentAnalyzer:
             start_pos = headings[i].start_pos
             end_pos = headings[i+1].start_pos if i < len(headings)-1 else len(text)
             
-            # Extract section text (including heading)
-            section_text = text[start_pos:end_pos].strip()
-            
-            # Only include sections with content beyond the heading
+            # Extract section text and check content
             heading_text = text[start_pos:headings[i].end_pos].strip()
             content_text = text[headings[i].end_pos:end_pos].strip()
+            section_text = heading_text + '\n' + content_text if content_text else heading_text
             
-            if content_text:  # Only include if there's content beyond the heading
+            # Log section details for debugging
+            logger.info(f"\nProcessing section {i+1}/{len(headings)}:")
+            logger.info(f"Heading: {heading_text}")
+            logger.info(f"Content length: {len(content_text)}")
+            logger.info(f"Start pos: {start_pos}, End pos: {end_pos}")
+            
+            # Include section if:
+            # 1. It has direct content beyond the heading, or
+            # 2. It's the first section (document title), or
+            # 3. It's a parent section (has subsections), or
+            # 4. It's the last section with content
+            is_first_section = i == 0
+            is_last_with_content = i == len(headings)-1 and content_text
+            has_subsections = (i < len(headings)-1 and headings[i+1].level > headings[i].level)
+            
+            if content_text or is_first_section or has_subsections or is_last_with_content:
+                # Calculate actual end position based on content
+                actual_end_pos = start_pos + len(heading_text) + (len(content_text) + 1 if content_text else 0)
+                
                 section = DocumentSection(
                     text=section_text,
                     start_pos=start_pos,
-                    end_pos=start_pos + len(section_text),  # Fix position calculation
+                    end_pos=actual_end_pos,
                     heading=headings[i]
                 )
                 sections.append(section)
+                logger.info(f"Added section:")
+                logger.info(f"  Heading: {heading_text}")
+                logger.info(f"  Content length: {len(content_text)}")
+                logger.info(f"  Start: {start_pos}, End: {actual_end_pos}")
                 
         logger.info(f"Extracted {len(sections)} sections from document")
         return sections
@@ -211,35 +250,58 @@ class DocumentAnalyzer:
         if not headings:
             return []
 
-        def add_to_toc(heading: Heading, current_level: List[Dict], level_map: Dict[int, Dict]) -> None:
+        def add_to_toc(heading: Heading, current_level: List[Dict], level_map: Dict[int, Dict], is_first_heading: bool) -> None:
             entry = {
                 'text': heading.text,
                 'level': heading.level,
                 'children': []
             }
+            logger.info(f"Adding TOC entry: {heading.text} (level {heading.level})")
             
-            if heading.level == 1:
+            if heading.level == 1 and is_first_heading:
+                # Only the first level 1 heading becomes the root
+                logger.info("Adding as root entry")
                 current_level.append(entry)
                 level_map[1] = entry
             else:
                 # Find the closest parent level
                 parent_level = heading.level - 1
+                parent_found = False
+                
                 while parent_level > 0:
                     if parent_level in level_map:
+                        logger.info(f"Found parent at level {parent_level}")
                         level_map[parent_level]['children'].append(entry)
                         level_map[heading.level] = entry
+                        parent_found = True
                         break
                     parent_level -= 1
-                if parent_level == 0:
-                    # No parent found, add at root level
-                    current_level.append(entry)
-                    level_map[heading.level] = entry
+                
+                if not parent_found:
+                    # If no parent found and not the first heading,
+                    # add as child of root if it exists
+                    if current_level and current_level[0]['level'] == 1:
+                        logger.info("Adding as child of root")
+                        current_level[0]['children'].append(entry)
+                        level_map[heading.level] = entry
+                    else:
+                        # No root exists, add at root level
+                        logger.info("No root found, adding at root level")
+                        current_level.append(entry)
+                        level_map[heading.level] = entry
 
         toc = []
         level_map = {}  # Track the last entry at each level
         
-        for heading in headings:
-            add_to_toc(heading, toc, level_map)
+        # Process headings
+        for i, heading in enumerate(headings):
+            add_to_toc(heading, toc, level_map, i == 0)
+            
+        # Log final TOC structure
+        logger.info(f"Built TOC with {len(toc)} root entries")
+        if toc:
+            logger.info(f"Root entry: {toc[0]['text']}")
+            logger.info(f"Number of root children: {len(toc[0]['children'])}")
             
         return toc
 
@@ -390,12 +452,16 @@ class DocumentAnalyzer:
             classification = self.classify_document(text, title)
             logger.info(f"Classified document as: {classification}")
             
-            return {
+            result = {
                 'classification': classification,
                 'toc': toc,
                 'headings': headings,
                 'sections': sections
             }
+            logger.info(f"Document analysis complete - TOC has {len(toc)} top-level entries")
+            if toc:
+                logger.info(f"First TOC entry: {toc[0]['text']}")
+            return result
             
         except Exception as e:
             logger.error(f"Error analyzing document: {str(e)}")

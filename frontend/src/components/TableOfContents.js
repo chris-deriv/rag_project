@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import PropTypes from 'prop-types';
 import {
   Box,
@@ -37,6 +37,16 @@ const safeResizeObserver = (callback) => {
 const TableOfContents = ({ toc = [] }) => {
   const theme = useTheme();
   const [expanded, setExpanded] = useState({});
+
+  // Log TOC data when it changes
+  useEffect(() => {
+    console.log('TableOfContents received TOC:', toc);
+    if (!toc || toc.length === 0) {
+      console.log('No TOC data available');
+    } else {
+      console.log('TOC structure:', JSON.stringify(toc, null, 2));
+    }
+  }, [toc]);
 
   // Memoize expanded state handler
   const toggleExpand = useCallback((index) => {
@@ -127,6 +137,7 @@ const TableOfContents = ({ toc = [] }) => {
   }, [expanded, handleKeyDown, theme.palette.primary.main, toggleExpand]);
 
   if (!toc || toc.length === 0) {
+    console.log('Rendering empty TOC state');
     return (
       <Paper
         elevation={0}
@@ -143,6 +154,8 @@ const TableOfContents = ({ toc = [] }) => {
       </Paper>
     );
   }
+
+  console.log('Rendering TOC with entries:', toc.length);
 
   return (
     <Paper
