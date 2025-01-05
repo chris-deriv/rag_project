@@ -22,24 +22,28 @@ def test_add_documents_with_cleanup(mock_chroma_client):
         db = VectorDatabase()
         
         documents = [
-            {
-                'id': 1,
-                'text': 'Test document 1',
-                'embedding': np.array([0.1, 0.2, 0.3]),
-                'source_name': 'test1.pdf',
-                'title': 'Test Document 1',
-                'file_type': 'pdf',
-                'section_type': 'content'
-            },
-            {
-                'id': 2,
-                'text': 'Test document 2',
-                'embedding': np.array([0.4, 0.5, 0.6]),
-                'source_name': 'test2.docx',
-                'title': 'Test Document 2',
-                'file_type': 'docx',
-                'section_type': 'content'
-            }
+                {
+                    'id': 1,
+                    'text': 'Test document 1',
+                    'embedding': np.array([0.1, 0.2, 0.3]),
+                    'source_name': 'test1.pdf',
+                    'title': 'Test Document 1',
+                    'file_type': 'pdf',
+                    'section_type': 'content',
+                    'chunk_index': 0,
+                    'total_chunks': 1
+                },
+                {
+                    'id': 2,
+                    'text': 'Test document 2',
+                    'embedding': np.array([0.4, 0.5, 0.6]),
+                    'source_name': 'test2.docx',
+                    'title': 'Test Document 2',
+                    'file_type': 'docx',
+                    'section_type': 'content',
+                    'chunk_index': 0,
+                    'total_chunks': 1
+                }
         ]
         
         # Configure mock to return different documents for each source

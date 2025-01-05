@@ -574,31 +574,60 @@ class TestDocumentStore:
         mock_embedding_generator = Mock()
         mock_embedding_generator.generate_embeddings.return_value = mock_embeddings
         
+        # Configure mock analyzer to return sections that will produce 2 chunks
+        mock_document_analyzer.analyze_document.return_value = {
+            'classification': 'policies_procedures',
+            'toc': [{'text': 'Test Document', 'level': 1, 'children': []}],
+            'headings': [
+                Heading(text='Test Document', level=1, start_pos=0, end_pos=12),
+                Heading(text='Section 1', level=2, start_pos=13, end_pos=22)
+            ],
+            'sections': [
+                DocumentSection(
+                    text='Test Document\nFirst chunk',
+                    start_pos=0,
+                    end_pos=40,
+                    heading=Heading(text='Test Document', level=1, start_pos=0, end_pos=12)
+                ),
+                DocumentSection(
+                    text='Section 1\nSecond chunk',
+                    start_pos=41,
+                    end_pos=80,
+                    heading=Heading(text='Section 1', level=2, start_pos=41, end_pos=50)
+                )
+            ]
+        }
+
         # Create mock VectorDatabase
         mock_vector_db = Mock()
-        mock_vector_db.get_document_chunks.side_effect = [
-            [],  # First call for existing chunks
-            [  # Second call for verification
-                {
-                    'id': 'chunk1',
-                    'text': 'First chunk',
-                    'chunk_index': 0,
-                    'total_chunks': 3
-                },
-                {
-                    'id': 'chunk2',
-                    'text': 'Second chunk',
-                    'chunk_index': 1,
-                    'total_chunks': 3
-                },
-                {
-                    'id': 'chunk3',
-                    'text': 'Third chunk',
-                    'chunk_index': 2,
-                    'total_chunks': 3
-                }
-            ]
-        ]
+        # Configure mock to return different results based on when it's called
+        def mock_get_chunks(source_name):
+            # Track number of calls to return appropriate response
+            if not hasattr(mock_get_chunks, 'call_count'):
+                mock_get_chunks.call_count = 0
+            mock_get_chunks.call_count += 1
+            
+            if mock_get_chunks.call_count == 1:
+                # First call during cleanup check
+                return []
+            else:
+                # Subsequent calls for verification
+                return [
+                    {
+                        'id': 'chunk1',
+                        'text': 'First chunk',
+                        'chunk_index': 0,
+                        'total_chunks': 2
+                    },
+                    {
+                        'id': 'chunk2',
+                        'text': 'Second chunk',
+                        'chunk_index': 1,
+                        'total_chunks': 2
+                    }
+                ]
+        
+        mock_vector_db.get_document_chunks.side_effect = mock_get_chunks
         
         # Create a temporary file
         with tempfile.NamedTemporaryFile(suffix='.pdf', mode='w+b', delete=False) as f:
@@ -620,18 +649,18 @@ class TestDocumentStore:
                         
                         # Verify state
                         assert state.status == 'completed'
-                        assert state.chunk_count == 3
-                        assert state.total_chunks == 3
+                        assert state.chunk_count == 2  # Two sections = two chunks
+                        assert state.total_chunks == 2
                         
                         # Get stored chunks
                         chunks = store.db.get_document_chunks(os.path.basename(test_file))
                         
                         # Verify chunk indices
                         chunk_indices = [chunk['chunk_index'] for chunk in chunks]
-                        assert chunk_indices == [0, 1, 2]  # Should be sequential
+                        assert chunk_indices == [0, 1]  # Should be sequential
                         
                         # Verify total_chunks is consistent
-                        assert all(chunk['total_chunks'] == 3 for chunk in chunks)
+                        assert all(chunk['total_chunks'] == 2 for chunk in chunks)
                         
         finally:
             if os.path.exists(test_file):

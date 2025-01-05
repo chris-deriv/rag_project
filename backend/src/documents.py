@@ -104,6 +104,17 @@ class DocumentProcessor:
         return len
 
     def _split_section(self, section: DocumentSection, metadata: Dict[str, Any], total_chunks: Optional[int] = None, start_index: int = 0) -> List[DocumentChunk]:
+        """Split a section into chunks while preserving metadata.
+        
+        Args:
+            section: The section to split
+            metadata: Base metadata to apply to all chunks
+            total_chunks: Total number of chunks across all sections (required)
+            start_index: Starting index for this section's chunks
+            
+        Returns:
+            List of document chunks with metadata
+        """
         """Split a section into chunks while preserving metadata."""
         if not section.text.strip():
             return []
@@ -122,10 +133,22 @@ class DocumentProcessor:
         # Create document chunks with metadata
         chunks = []
         for i, chunk_text in enumerate(raw_chunks):
-            # Ensure each chunk starts with the section heading
-            if i > 0:  # Not first chunk
-                chunk_text = heading_text + "\n" + chunk_text
+            # Calculate available space for content after accounting for heading
+            heading_prefix = heading_text + "\n" if i > 0 else ""
+            available_space = self.chunk_size - len(heading_prefix)
             
+            # Trim chunk content if needed to stay within limit
+            if len(chunk_text) > available_space:
+                chunk_text = chunk_text[:available_space]
+            
+            # Add heading prefix if not first chunk
+            if i > 0:
+                chunk_text = heading_prefix + chunk_text
+            
+            # Calculate total_chunks if not provided
+            if total_chunks is None:
+                total_chunks = len(raw_chunks)
+                
             chunk_metadata = {
                 **metadata,
                 'chunk_index': start_index + i,  # Use provided start index
